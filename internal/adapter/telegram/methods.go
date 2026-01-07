@@ -235,11 +235,12 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	var u tg.InputFileClass
 	var uploadErr error
 
+	// Special case for empty files: Telegram rejects 0-byte files.
+	// We upload a 1-byte dummy file and mark it with a flag.
 	if file.Size == 0 {
-		// Special case for empty files to avoid FILE_PARTS_INVALID
 		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
 			return uploadID, nil
-		}).FromBytes(ctx, filepath.Base(file.Path), []byte{})
+		}).FromBytes(ctx, filepath.Base(file.Path), []byte{0})
 	} else {
 		// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
 		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
@@ -256,6 +257,9 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		Path:     file.Path,
 		Checksum: file.Checksum,
 		ModTime:  file.ModTime,
+	}
+	if file.Size == 0 {
+		meta.Flags = "EMPTY_FILE"
 	}
 	captionBytes, err := json.Marshal(meta)
 	if err != nil {

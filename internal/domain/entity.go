@@ -5,6 +5,7 @@ type FileMeta struct {
 	Path     string `json:"p"`
 	Checksum string `json:"m,omitempty"`
 	ModTime  int64  `json:"t,omitempty"`
+	Flags    string `json:"f,omitempty"`
 }
 
 // RemoteFile represents a file stored on Telegram.

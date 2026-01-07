@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"tg-blobsync/internal/domain"
 
 	"golang.org/x/sync/errgroup"
@@ -66,7 +67,11 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 			shouldUpdate := false
 			if s.skipMD5 {
 				// Use ModTime and Size as comparison
-				if remoteFile.Meta.ModTime != localFile.ModTime || remoteFile.Size != localFile.Size {
+				remoteSize := remoteFile.Size
+				if remoteFile.Meta.Flags == "EMPTY_FILE" {
+					remoteSize = 0
+				}
+				if remoteFile.Meta.ModTime != localFile.ModTime || remoteSize != localFile.Size {
 					shouldUpdate = true
 				}
 			} else {
@@ -213,7 +218,11 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 		} else {
 			shouldUpdate := false
 			if s.skipMD5 {
-				if localFile.ModTime != remoteFile.Meta.ModTime || localFile.Size != remoteFile.Size {
+				remoteSize := remoteFile.Size
+				if remoteFile.Meta.Flags == "EMPTY_FILE" {
+					remoteSize = 0
+				}
+				if localFile.ModTime != remoteFile.Meta.ModTime || localFile.Size != remoteSize {
 					shouldUpdate = true
 				}
 			} else {
@@ -265,13 +274,21 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 		remoteFile := remoteMap[path]
 
 		dg.Go(func() error {
+			fullPath := filepath.Join(rootDir, path)
+			if remoteFile.Meta.Flags == "EMPTY_FILE" {
+				log.Printf("[*] Restoring empty file: %s", path)
+				if err := s.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
+					return fmt.Errorf("error creating empty file %s: %w", path, err)
+				}
+				return nil
+			}
+
 			rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID, remoteFile.Meta.Path, remoteFile.Size)
 			if err != nil {
 				return fmt.Errorf("error downloading file %s: %w", path, err)
 			}
 			defer rc.Close()
 
-			fullPath := filepath.Join(rootDir, path)
 			if err := s.fs.WriteFile(fullPath, rc); err != nil {
 				return fmt.Errorf("error writing file %s: %w", path, err)
 			}
