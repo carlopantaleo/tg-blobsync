@@ -166,7 +166,7 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 			// Parse Caption and Document Info
 			if m.Message != "" {
 				var meta domain.FileMeta
-				// Ignoriamo errori di unmarshal, significa che non è un file nostro
+				// Ignore unmarshal errors, it means it's not a file created by us
 				if err := json.Unmarshal([]byte(m.Message), &meta); err == nil {
 					if meta.Path != "" && (meta.Checksum != "" || meta.ModTime != 0) {
 						size := int64(0)
@@ -231,7 +231,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		t.mu.Unlock()
 	}()
 
-	// 1. Upload del contenuto grezzo
+	// 1. Raw content upload
 	var u tg.InputFileClass
 	var uploadErr error
 
@@ -252,7 +252,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		return fmt.Errorf("failed to upload raw content: %w", uploadErr)
 	}
 
-	// 2. Preparazione Metadati JSON
+	// 2. JSON Metadata preparation
 	meta := domain.FileMeta{
 		Path:     file.Path,
 		Checksum: file.Checksum,
@@ -267,13 +267,13 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	}
 	caption := string(captionBytes)
 
-	// 3. Determinazione MIME type
+	// 3. MIME type determination
 	mimeType := mime.TypeByExtension(filepath.Ext(file.Path))
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
 
-	// 4. Invio Messaggio con Documento
+	// 4. Send Message with Document
 	_, err = t.sender.To(inputPeer).
 		Reply(int(topicID)).
 		Media(ctx, message.UploadedDocument(u, styling.Plain(caption)).
@@ -362,7 +362,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	t.progressStarts[downloadID] = time.Now()
 	t.mu.Unlock()
 
-	// Fetch del messaggio per ottenere la location del file
+	// Fetch message to get file location
 	msgs, err := t.api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
 		Channel: &tg.InputChannel{
 			ChannelID:  groupID,
@@ -410,7 +410,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 		return nil, errors.New("media is not a document")
 	}
 
-	// Pipe per lo streaming
+	// Pipe for streaming
 	pr, pw := io.Pipe()
 
 	var task domain.ProgressTask
@@ -493,7 +493,7 @@ func (tw *trackingWriter) report() {
 		return
 	}
 
-	// Log ogni 5MB o alla fine
+	// Log every 5MB or at the end
 	if tw.uploaded == tw.total || tw.uploaded-tw.lastLog >= 5*1024*1024 {
 		tw.lastLog = tw.uploaded
 		percent := float64(tw.uploaded) / float64(tw.total) * 100
