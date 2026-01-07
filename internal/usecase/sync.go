@@ -121,13 +121,7 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 		localFile := localMap[path]
 
 		g.Go(func() error {
-			f, err := s.fs.ReadFile(localFile.AbsPath)
-			if err != nil {
-				return fmt.Errorf("error reading local file %s: %w", path, err)
-			}
-			defer f.Close()
-
-			err = s.storage.UploadFile(gCtx, groupID, topicID, localFile, f)
+			err = s.storage.UploadFile(gCtx, groupID, topicID, localFile)
 			if err != nil {
 				return fmt.Errorf("error uploading file %s: %w", path, err)
 			}

@@ -32,6 +32,7 @@ type TelegramClient struct {
 	mu             sync.RWMutex
 
 	progressReporter domain.ProgressReporter
+	uploadThreads    int
 }
 
 // AuthInput defines an interface for interactive authentication input.
@@ -58,9 +59,22 @@ func NewTelegramClient(appID int, appHash string, sessionFile string, input Auth
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
+		uploadThreads:  8, // Default
 	}
 
 	return tc, nil
+}
+
+func (t *TelegramClient) SetUploadThreads(threads int) {
+	if threads <= 0 {
+		threads = 1
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.uploadThreads = threads
+	if t.uploader != nil {
+		t.uploader = t.uploader.WithThreads(threads)
+	}
 }
 
 // Start connects and authenticates the client.
@@ -91,7 +105,10 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 			// Initialize helpers
 			t.api = t.client.API()
 			t.sender = message.NewSender(t.api)
-			t.uploader = uploader.NewUploader(t.api).WithProgress(t)
+			t.uploader = uploader.NewUploader(t.api).
+				WithProgress(t).
+				WithPartSize(512 * 1024). // 512KB is the maximum part size
+				WithThreads(t.uploadThreads)
 
 			// Signal ready
 			select {

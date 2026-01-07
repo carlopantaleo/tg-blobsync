@@ -25,7 +25,7 @@ type BlobStorage interface {
 
 	// File Operations
 	ListFiles(ctx context.Context, groupID int64, topicID int64) ([]RemoteFile, error)
-	UploadFile(ctx context.Context, groupID int64, topicID int64, file LocalFile, data io.Reader) error
+	UploadFile(ctx context.Context, groupID int64, topicID int64, file LocalFile) error
 	DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error
 	DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error)
 

@@ -28,12 +28,14 @@ func main() {
 
 	// Common flags
 	var (
-		groupID int64
-		topicID int64
-		dirPath string
-		workers int
-		verbose bool
-		skipMD5 bool
+		groupID        int64
+		topicID        int64
+		dirPath        string
+		workers        int
+		uploadThreads  int
+		verbose        bool
+		skipMD5        bool
+		nonInteractive bool
 	)
 
 	// Helper to setup common flags
@@ -41,9 +43,11 @@ func main() {
 		f.Int64Var(&groupID, "group-id", 0, "ID of the Supergroup")
 		f.Int64Var(&topicID, "topic-id", 0, "ID of the Topic")
 		f.StringVar(&dirPath, "dir", "", "Path to the directory to sync")
-		f.IntVar(&workers, "workers", 4, "Number of concurrent workers")
+		f.IntVar(&workers, "workers", 4, "Number of concurrent files")
+		f.IntVar(&uploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 		f.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 		f.BoolVar(&skipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
+		f.BoolVar(&nonInteractive, "non-interactive", false, "Disable interactive UI and progress bars")
 	}
 
 	setupFlags(pushCmd)
@@ -72,6 +76,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	if nonInteractive {
+		if groupID == 0 {
+			fmt.Println("Error: --group-id is required in non-interactive mode")
+			os.Exit(1)
+		}
+		if topicID == 0 {
+			fmt.Println("Error: --topic-id is required in non-interactive mode")
+			os.Exit(1)
+		}
+	}
+
 	// Validate App Credentials
 	if AppID == "" || AppHash == "" {
 		// Fallback for dev/debug if env vars present
@@ -95,7 +110,7 @@ func main() {
 	// Initialize Dependencies
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	console := ui.NewConsoleUI()
+	console := ui.NewConsoleUI(nonInteractive)
 
 	sessionPath, err := config.GetSessionPath()
 	if err != nil {
@@ -117,6 +132,8 @@ func main() {
 	defer tgClient.Close()
 
 	log.Println("Connected!")
+
+	tgClient.SetUploadThreads(uploadThreads)
 
 	// Interactive Selection if needed
 	if groupID == 0 {

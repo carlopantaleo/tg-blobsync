@@ -2,9 +2,11 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"tg-blobsync/internal/domain"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	"github.com/vbauerster/mpb/v8"
@@ -13,18 +15,32 @@ import (
 
 // ConsoleUI handles user interactions via the terminal.
 type ConsoleUI struct {
-	progress *mpb.Progress
+	progress       *mpb.Progress
+	nonInteractive bool
 }
 
-func NewConsoleUI() *ConsoleUI {
+func NewConsoleUI(nonInteractive bool) *ConsoleUI {
+	var p *mpb.Progress
+	if !nonInteractive {
+		p = mpb.New(mpb.WithWidth(64))
+	}
 	return &ConsoleUI{
-		progress: mpb.New(mpb.WithWidth(64)),
+		progress:       p,
+		nonInteractive: nonInteractive,
 	}
 }
 
 // Progress Reporter Implementation
 
 func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
+	if u.nonInteractive {
+		return &nonInteractiveTask{
+			name:      name,
+			total:     total,
+			startTime: time.Now(),
+		}
+	}
+
 	bar := u.progress.AddBar(total,
 		mpb.PrependDecorators(
 			decor.Name(name, decor.WC{W: len(name) + 1}),
@@ -41,6 +57,9 @@ func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
 }
 
 func (u *ConsoleUI) Wait() {
+	if u.nonInteractive {
+		return
+	}
 	u.progress.Wait()
 	// Re-initialize progress for next use if needed
 	u.progress = mpb.New(mpb.WithWidth(64))
@@ -60,6 +79,44 @@ func (t *mpbTask) SetCurrent(current int64) {
 
 func (t *mpbTask) Complete() {
 	t.bar.SetTotal(-1, true)
+}
+
+type nonInteractiveTask struct {
+	name      string
+	total     int64
+	current   int64
+	startTime time.Time
+}
+
+func (t *nonInteractiveTask) Increment(n int) {
+	t.current += int64(n)
+}
+
+func (t *nonInteractiveTask) SetCurrent(current int64) {
+	t.current = current
+}
+
+func (t *nonInteractiveTask) Complete() {
+	elapsed := time.Since(t.startTime).Seconds()
+	speed := float64(t.current) / elapsed
+	fmt.Printf("Finished: %s | Size: %s | Speed: %s/s\n",
+		t.name,
+		formatSize(t.current),
+		formatSize(int64(speed)),
+	)
+}
+
+func formatSize(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // GetPhoneNumber prompts the user for their phone number.

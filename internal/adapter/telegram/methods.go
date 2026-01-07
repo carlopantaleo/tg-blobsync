@@ -198,7 +198,7 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 }
 
 // UploadFile uploads a file to the topic with progress reporting.
-func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile, data io.Reader) error {
+func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
 	accessHash, _ := t.getAccessHash(groupID)
 	inputPeer := &tg.InputPeerChannel{
 		ChannelID:  groupID,
@@ -227,11 +227,16 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	}()
 
 	// 1. Upload del contenuto grezzo
-	u, err := t.uploader.WithIDGenerator(func() (int64, error) {
+	var u tg.InputFileClass
+	var uploadErr error
+
+	// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
+	u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
 		return uploadID, nil
-	}).Upload(ctx, uploader.NewUpload(file.Path, data, file.Size))
-	if err != nil {
-		return err
+	}).FromPath(ctx, file.AbsPath)
+
+	if uploadErr != nil {
+		return uploadErr
 	}
 
 	// 2. Preparazione Metadati JSON
@@ -418,7 +423,8 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 		}
 
 		// gotd downloader
-		dl := downloader.NewDownloader()
+		dl := downloader.NewDownloader().
+			WithPartSize(512 * 1024) // Max part size for download
 		// Check location
 		loc := d.AsInputDocumentFileLocation()
 
