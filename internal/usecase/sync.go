@@ -52,53 +52,75 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 		remoteMap[f.Meta.Path] = f
 	}
 
-	// 3. Upload (Upsert)
+	// 3. Plan Operations
+	var toUpload, toUpdate []string
+	for path, localFile := range localMap {
+		remoteFile, exists := remoteMap[path]
+		if !exists {
+			toUpload = append(toUpload, path)
+		} else if remoteFile.Meta.Checksum != localFile.Checksum {
+			toUpdate = append(toUpdate, path)
+		}
+	}
+
+	var toDelete []string
+	for path := range remoteMap {
+		if _, exists := localMap[path]; !exists {
+			toDelete = append(toDelete, path)
+		}
+	}
+
+	log.Printf("----------------------------------------------------------")
+	log.Printf("Sync Summary (Push):")
+	log.Printf("  Local files:  %d", len(localMap))
+	log.Printf("  Remote files: %d", len(remoteMap))
+	log.Printf("  To Upload:    %d", len(toUpload))
+	log.Printf("  To Update:    %d", len(toUpdate))
+	log.Printf("  To Delete:    %d", len(toDelete))
+	log.Printf("----------------------------------------------------------")
+
+	if len(toUpload)+len(toUpdate)+len(toDelete) == 0 {
+		log.Println("Everything is up to date.")
+		return nil
+	}
+
+	// 4. Upload & Update (Upsert)
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(s.workers)
 
-	for path, localFile := range localMap {
+	// Combine upload and update tasks
+	allTasks := append(toUpload, toUpdate...)
+
+	for _, path := range allTasks {
 		path := path
-		localFile := localFile
-		remoteFile, exists := remoteMap[path]
+		localFile := localMap[path]
 
-		shouldUpload := false
-		if !exists {
-			log.Printf("[+] Uploading new file: %s", path)
-			shouldUpload = true
-		} else if remoteFile.Meta.Checksum != localFile.Checksum {
-			log.Printf("[*] Updating modified file: %s", path)
-			shouldUpload = true
-		}
+		g.Go(func() error {
+			f, err := s.fs.ReadFile(localFile.AbsPath)
+			if err != nil {
+				return fmt.Errorf("error reading local file %s: %w", path, err)
+			}
+			defer f.Close()
 
-		if shouldUpload {
-			g.Go(func() error {
-				f, err := s.fs.ReadFile(localFile.AbsPath)
-				if err != nil {
-					return fmt.Errorf("error reading local file %s: %w", path, err)
-				}
-				defer f.Close()
-
-				err = s.storage.UploadFile(gCtx, groupID, topicID, localFile, f)
-				if err != nil {
-					return fmt.Errorf("error uploading file %s: %w", path, err)
-				}
-				return nil
-			})
-		}
+			err = s.storage.UploadFile(gCtx, groupID, topicID, localFile, f)
+			if err != nil {
+				return fmt.Errorf("error uploading file %s: %w", path, err)
+			}
+			return nil
+		})
 	}
 
 	if err := g.Wait(); err != nil {
 		return err
 	}
 
-	// 4. Pruning (Delete from remote if not in local)
-	for path, remoteFile := range remoteMap {
-		if _, exists := localMap[path]; !exists {
-			log.Printf("[-] Deleting remote file: %s", path)
-			err := s.storage.DeleteFile(ctx, groupID, topicID, remoteFile.MessageID)
-			if err != nil {
-				log.Printf("Error deleting remote file %s: %v", path, err)
-			}
+	// 5. Pruning (Delete from remote if not in local)
+	for _, path := range toDelete {
+		remoteFile := remoteMap[path]
+		log.Printf("[-] Deleting remote file: %s", path)
+		err := s.storage.DeleteFile(ctx, groupID, topicID, remoteFile.MessageID)
+		if err != nil {
+			log.Printf("Error deleting remote file %s: %v", path, err)
 		}
 	}
 
@@ -145,55 +167,75 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 		localMap[f.Path] = f
 	}
 
-	// 3. Download
+	// 3. Plan Operations
+	var toDownload, toUpdate []string
+	for path, remoteFile := range remoteMap {
+		localFile, exists := localMap[path]
+		if !exists {
+			toDownload = append(toDownload, path)
+		} else if localFile.Checksum != remoteFile.Meta.Checksum {
+			toUpdate = append(toUpdate, path)
+		}
+	}
+
+	var toDelete []string
+	for path := range localMap {
+		if _, exists := remoteMap[path]; !exists {
+			toDelete = append(toDelete, path)
+		}
+	}
+
+	log.Printf("----------------------------------------------------------")
+	log.Printf("Sync Summary (Pull):")
+	log.Printf("  Local files:  %d", len(localMap))
+	log.Printf("  Remote files: %d", len(remoteMap))
+	log.Printf("  To Download:  %d", len(toDownload))
+	log.Printf("  To Update:    %d", len(toUpdate))
+	log.Printf("  To Delete:    %d", len(toDelete))
+	log.Printf("----------------------------------------------------------")
+
+	if len(toDownload)+len(toUpdate)+len(toDelete) == 0 {
+		log.Println("Everything is up to date.")
+		return nil
+	}
+
+	// 4. Download
 	dg, dgCtx := errgroup.WithContext(ctx)
 	dg.SetLimit(s.workers)
 
-	for path, remoteFile := range remoteMap {
+	allTasks := append(toDownload, toUpdate...)
+
+	for _, path := range allTasks {
 		path := path
-		remoteFile := remoteFile
-		localFile, exists := localMap[path]
+		remoteFile := remoteMap[path]
 
-		shouldDownload := false
-		if !exists {
-			log.Printf("[+] Downloading new file: %s", path)
-			shouldDownload = true
-		} else if localFile.Checksum != remoteFile.Meta.Checksum {
-			log.Printf("[*] Updating modified file: %s", path)
-			shouldDownload = true
-		}
+		dg.Go(func() error {
+			rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID, remoteFile.Meta.Path, remoteFile.Size)
+			if err != nil {
+				return fmt.Errorf("error downloading file %s: %w", path, err)
+			}
+			defer rc.Close()
 
-		if shouldDownload {
-			dg.Go(func() error {
-				rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID)
-				if err != nil {
-					return fmt.Errorf("error downloading file %s: %w", path, err)
-				}
-				defer rc.Close()
-
-				fullPath := filepath.Join(rootDir, path)
-				err = s.fs.WriteFile(fullPath, rc)
-				if err != nil {
-					return fmt.Errorf("error writing file %s: %w", path, err)
-				}
-				return nil
-			})
-		}
+			fullPath := filepath.Join(rootDir, path)
+			err = s.fs.WriteFile(fullPath, rc)
+			if err != nil {
+				return fmt.Errorf("error writing file %s: %w", path, err)
+			}
+			return nil
+		})
 	}
 
 	if err := dg.Wait(); err != nil {
 		return err
 	}
 
-	// 4. Pruning (Delete local if not in remote)
-	for path := range localMap {
-		if _, exists := remoteMap[path]; !exists {
-			log.Printf("[-] Deleting local file: %s", path)
-			fullPath := filepath.Join(rootDir, path)
-			err := s.fs.DeleteFile(fullPath)
-			if err != nil {
-				log.Printf("Error deleting local file %s: %v", path, err)
-			}
+	// 5. Pruning (Delete local if not in remote)
+	for _, path := range toDelete {
+		log.Printf("[-] Deleting local file: %s", path)
+		fullPath := filepath.Join(rootDir, path)
+		err := s.fs.DeleteFile(fullPath)
+		if err != nil {
+			log.Printf("Error deleting local file %s: %v", path, err)
 		}
 	}
 

@@ -10,6 +10,7 @@ type FileMeta struct {
 type RemoteFile struct {
 	Meta      FileMeta
 	MessageID int
+	Size      int64
 }
 
 // LocalFile represents a file on the local filesystem.
@@ -17,7 +18,7 @@ type LocalFile struct {
 	Path     string // Relative path
 	Checksum string
 	Size     int64
-    AbsPath  string // Absolute path for internal use
+	AbsPath  string // Absolute path for internal use
 }
 
 // Group represents a Telegram Supergroup.

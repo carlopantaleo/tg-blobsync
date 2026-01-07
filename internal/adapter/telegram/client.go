@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"time"
+
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
@@ -23,8 +25,9 @@ type TelegramClient struct {
 	uploader *uploader.Uploader
 	ctx      context.Context
 
-	peerCache map[int64]int64 // map[ChannelID]AccessHash
-	mu        sync.RWMutex
+	peerCache      map[int64]int64 // map[ChannelID]AccessHash
+	progressStarts map[int64]time.Time
+	mu             sync.RWMutex
 }
 
 // AuthInput defines an interface for interactive authentication input.
@@ -47,8 +50,9 @@ func NewTelegramClient(appID int, appHash string, sessionFile string, input Auth
 	client := telegram.NewClient(appID, appHash, opts)
 
 	tc := &TelegramClient{
-		client:    client,
-		peerCache: make(map[int64]int64),
+		client:         client,
+		peerCache:      make(map[int64]int64),
+		progressStarts: make(map[int64]time.Time),
 	}
 
 	return tc, nil
@@ -82,7 +86,7 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 			// Initialize helpers
 			t.api = t.client.API()
 			t.sender = message.NewSender(t.api)
-			t.uploader = uploader.NewUploader(t.api)
+			t.uploader = uploader.NewUploader(t.api).WithProgress(t)
 
 			// Signal ready
 			select {

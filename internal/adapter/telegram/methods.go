@@ -6,11 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"path/filepath"
 
 	"tg-blobsync/internal/domain"
 
+	"time"
+
+	"github.com/gotd/td/crypto"
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/styling"
@@ -159,15 +163,24 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 				continue
 			}
 
-			// Parse Caption
+			// Parse Caption and Document Info
 			if m.Message != "" {
 				var meta domain.FileMeta
 				// Ignoriamo errori di unmarshal, significa che non è un file nostro
 				if err := json.Unmarshal([]byte(m.Message), &meta); err == nil {
 					if meta.Path != "" && meta.Checksum != "" {
+						size := int64(0)
+						if m.Media != nil {
+							if doc, ok := m.Media.(*tg.MessageMediaDocument); ok {
+								if d, ok := doc.Document.(*tg.Document); ok {
+									size = d.Size
+								}
+							}
+						}
 						files = append(files, domain.RemoteFile{
 							Meta:      meta,
 							MessageID: m.ID,
+							Size:      size,
 						})
 					}
 				}
@@ -184,6 +197,7 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 	return files, nil
 }
 
+// UploadFile uploads a file to the topic with progress reporting.
 func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile, data io.Reader) error {
 	accessHash, _ := t.getAccessHash(groupID)
 	inputPeer := &tg.InputPeerChannel{
@@ -191,8 +205,23 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		AccessHash: accessHash,
 	}
 
+	log.Printf("[...] Uploading: %s (%s)", file.Path, formatSize(file.Size))
+
+	// Track start time for speed calculation
+	uploadID, _ := crypto.RandInt64(crypto.DefaultRand())
+	t.mu.Lock()
+	t.progressStarts[uploadID] = time.Now()
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		delete(t.progressStarts, uploadID)
+		t.mu.Unlock()
+	}()
+
 	// 1. Upload del contenuto grezzo
-	u, err := t.uploader.Upload(ctx, uploader.NewUpload(file.Path, data, file.Size))
+	u, err := t.uploader.WithIDGenerator(func() (int64, error) {
+		return uploadID, nil
+	}).Upload(ctx, uploader.NewUpload(file.Path, data, file.Size))
 	if err != nil {
 		return err
 	}
@@ -222,7 +251,50 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 			Filename(filepath.Base(file.Path)),
 		)
 
+	if err == nil {
+		log.Printf("[+] Uploaded: %s", file.Path)
+	}
+
 	return err
+}
+
+// Chunk implements uploader.Progress interface.
+func (t *TelegramClient) Chunk(ctx context.Context, state uploader.ProgressState) error {
+	if state.Total > 0 {
+		percent := float64(state.Uploaded) / float64(state.Total) * 100
+
+		t.mu.RLock()
+		startTime, ok := t.progressStarts[state.ID]
+		t.mu.RUnlock()
+
+		speedStr := ""
+		if ok {
+			elapsed := time.Since(startTime).Seconds()
+			if elapsed > 0 {
+				speed := float64(state.Uploaded) / elapsed
+				speedStr = fmt.Sprintf(" | %s/s", formatSize(int64(speed)))
+			}
+		}
+
+		// Log ogni 5MB o al completamento per non intasare i log
+		if state.Uploaded == state.Total || state.Uploaded%(5*1024*1024) < int64(state.PartSize) {
+			log.Printf("  [%s] %.1f%% (%s/%s)%s", state.Name, percent, formatSize(state.Uploaded), formatSize(state.Total), speedStr)
+		}
+	}
+	return nil
+}
+
+func formatSize(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
@@ -239,8 +311,17 @@ func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID 
 	return err
 }
 
-func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int) (io.ReadCloser, error) {
+func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
 	accessHash, _ := t.getAccessHash(groupID)
+
+	log.Printf("[...] Downloading: %s (%s)", fileName, formatSize(size))
+
+	// Track start time for speed calculation (using a negative ID for downloads to avoid collision with uploads if any)
+	// Actually we can use the messageID as part of the key
+	downloadID := int64(messageID)
+	t.mu.Lock()
+	t.progressStarts[downloadID] = time.Now()
+	t.mu.Unlock()
 
 	// Fetch del messaggio per ottenere la location del file
 	msgs, err := t.api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
@@ -251,6 +332,9 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 		ID: []tg.InputMessageClass{&tg.InputMessageID{ID: messageID}},
 	})
 	if err != nil {
+		t.mu.Lock()
+		delete(t.progressStarts, downloadID)
+		t.mu.Unlock()
 		return nil, err
 	}
 
@@ -265,16 +349,25 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	}
 
 	if msg == nil {
+		t.mu.Lock()
+		delete(t.progressStarts, downloadID)
+		t.mu.Unlock()
 		return nil, errors.New("message not found")
 	}
 
 	doc, ok := msg.Media.(*tg.MessageMediaDocument)
 	if !ok {
+		t.mu.Lock()
+		delete(t.progressStarts, downloadID)
+		t.mu.Unlock()
 		return nil, errors.New("message is not a document")
 	}
 
 	d, ok := doc.Document.(*tg.Document)
 	if !ok {
+		t.mu.Lock()
+		delete(t.progressStarts, downloadID)
+		t.mu.Unlock()
 		return nil, errors.New("media is not a document")
 	}
 
@@ -282,19 +375,75 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	pr, pw := io.Pipe()
 
 	go func() {
-		// Create a custom writer that writes to pw
+		defer func() {
+			t.mu.Lock()
+			delete(t.progressStarts, downloadID)
+			t.mu.Unlock()
+		}()
+
+		// Create a custom writer that tracks progress and writes to pw
+		tr := &trackingWriter{
+			w:         pw,
+			t:         t,
+			id:        downloadID,
+			name:      fileName,
+			total:     size,
+			lastLog:   0,
+			startTime: time.Now(),
+		}
+
 		// gotd downloader
 		dl := downloader.NewDownloader()
 		// Check location
 		loc := d.AsInputDocumentFileLocation()
 
-		_, err := dl.Download(t.api, loc).Stream(ctx, pw)
+		_, err := dl.Download(t.api, loc).Stream(ctx, tr)
 		if err != nil {
 			pw.CloseWithError(err)
 		} else {
+			log.Printf("[+] Downloaded: %s", fileName)
 			pw.Close()
 		}
 	}()
 
 	return pr, nil
+}
+
+type trackingWriter struct {
+	w         io.Writer
+	t         *TelegramClient
+	id        int64
+	name      string
+	total     int64
+	uploaded  int64
+	lastLog   int64
+	startTime time.Time
+}
+
+func (tw *trackingWriter) Write(p []byte) (n int, err error) {
+	n, err = tw.w.Write(p)
+	if n > 0 {
+		tw.uploaded += int64(n)
+		tw.report()
+	}
+	return n, err
+}
+
+func (tw *trackingWriter) report() {
+	if tw.total <= 0 {
+		return
+	}
+
+	// Log ogni 5MB o alla fine
+	if tw.uploaded == tw.total || tw.uploaded-tw.lastLog >= 5*1024*1024 {
+		tw.lastLog = tw.uploaded
+		percent := float64(tw.uploaded) / float64(tw.total) * 100
+		elapsed := time.Since(tw.startTime).Seconds()
+		speedStr := ""
+		if elapsed > 0 {
+			speed := float64(tw.uploaded) / elapsed
+			speedStr = fmt.Sprintf(" | %s/s", formatSize(int64(speed)))
+		}
+		log.Printf("  [%s] %.1f%% (%s/%s)%s", tw.name, percent, formatSize(tw.uploaded), formatSize(tw.total), speedStr)
+	}
 }
