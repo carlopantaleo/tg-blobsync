@@ -18,7 +18,7 @@ func NewLocalFileSystem() *LocalFileSystem {
 }
 
 // ListFiles recursively scans the root directory and returns a list of files with their metadata.
-func (l *LocalFileSystem) ListFiles(root string) ([]domain.LocalFile, error) {
+func (l *LocalFileSystem) ListFiles(root string, skipMD5 bool) ([]domain.LocalFile, error) {
 	var files []domain.LocalFile
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -34,24 +34,28 @@ func (l *LocalFileSystem) ListFiles(root string) ([]domain.LocalFile, error) {
 		if err != nil {
 			return err
 		}
-        
-        // Normalize path separators to forward slashes for consistency across platforms
-        relPath = filepath.ToSlash(relPath)
 
-		// Calculate MD5
-		checksum, err := l.calculateMD5(path)
-		if err != nil {
-			return fmt.Errorf("failed to calculate md5 for %s: %w", path, err)
-		}
+		// Normalize path separators to forward slashes for consistency across platforms
+		relPath = filepath.ToSlash(relPath)
 
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 
+		// Calculate MD5 if not skipped
+		checksum := ""
+		if !skipMD5 {
+			checksum, err = l.calculateMD5(path)
+			if err != nil {
+				return fmt.Errorf("failed to calculate md5 for %s: %w", path, err)
+			}
+		}
+
 		files = append(files, domain.LocalFile{
 			Path:     relPath,
 			Checksum: checksum,
+			ModTime:  info.ModTime().Unix(),
 			Size:     info.Size(),
 			AbsPath:  path,
 		})

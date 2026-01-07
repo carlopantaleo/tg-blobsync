@@ -168,7 +168,7 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 				var meta domain.FileMeta
 				// Ignoriamo errori di unmarshal, significa che non è un file nostro
 				if err := json.Unmarshal([]byte(m.Message), &meta); err == nil {
-					if meta.Path != "" && meta.Checksum != "" {
+					if meta.Path != "" && (meta.Checksum != "" || meta.ModTime != 0) {
 						size := int64(0)
 						if m.Media != nil {
 							if doc, ok := m.Media.(*tg.MessageMediaDocument); ok {
@@ -238,6 +238,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	meta := domain.FileMeta{
 		Path:     file.Path,
 		Checksum: file.Checksum,
+		ModTime:  file.ModTime,
 	}
 	captionBytes, err := json.Marshal(meta)
 	if err != nil {

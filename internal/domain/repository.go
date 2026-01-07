@@ -36,7 +36,7 @@ type BlobStorage interface {
 
 // FileSystem defines the interface for interacting with the local filesystem.
 type FileSystem interface {
-	ListFiles(root string) ([]LocalFile, error)
+	ListFiles(root string, skipMD5 bool) ([]LocalFile, error)
 	ReadFile(path string) (io.ReadCloser, error)
 	WriteFile(path string, data io.Reader) error
 	DeleteFile(path string) error

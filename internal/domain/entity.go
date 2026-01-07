@@ -3,7 +3,8 @@ package domain
 // FileMeta represents the metadata stored in the caption of the Telegram message.
 type FileMeta struct {
 	Path     string `json:"p"`
-	Checksum string `json:"m"`
+	Checksum string `json:"m,omitempty"`
+	ModTime  int64  `json:"t,omitempty"`
 }
 
 // RemoteFile represents a file stored on Telegram.
@@ -17,6 +18,7 @@ type RemoteFile struct {
 type LocalFile struct {
 	Path     string // Relative path
 	Checksum string
+	ModTime  int64
 	Size     int64
 	AbsPath  string // Absolute path for internal use
 }

@@ -33,6 +33,7 @@ func main() {
 		dirPath string
 		workers int
 		verbose bool
+		skipMD5 bool
 	)
 
 	// Helper to setup common flags
@@ -40,8 +41,9 @@ func main() {
 		f.Int64Var(&groupID, "group-id", 0, "ID of the Supergroup")
 		f.Int64Var(&topicID, "topic-id", 0, "ID of the Topic")
 		f.StringVar(&dirPath, "dir", "", "Path to the directory to sync")
-		f.IntVar(&workers, "workers", 4, "Number of concurrent workers (not implemented yet)")
+		f.IntVar(&workers, "workers", 4, "Number of concurrent workers")
 		f.BoolVar(&verbose, "verbose", false, "Enable verbose output")
+		f.BoolVar(&skipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
 	}
 
 	setupFlags(pushCmd)
@@ -156,7 +158,7 @@ func main() {
 	// Initialize Core Logic
 	tgClient.SetProgressReporter(console)
 	localFS := filesystem.NewLocalFileSystem()
-	syncer := usecase.NewSynchronizer(localFS, tgClient, workers, console)
+	syncer := usecase.NewSynchronizer(localFS, tgClient, workers, console, skipMD5)
 
 	// Execute Command
 	switch mode {

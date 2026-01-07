@@ -16,9 +16,10 @@ type Synchronizer struct {
 	storage  domain.BlobStorage
 	workers  int
 	reporter domain.ProgressReporter
+	skipMD5  bool
 }
 
-func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int, reporter domain.ProgressReporter) *Synchronizer {
+func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int, reporter domain.ProgressReporter, skipMD5 bool) *Synchronizer {
 	if workers <= 0 {
 		workers = 1
 	}
@@ -27,6 +28,7 @@ func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers i
 		storage:  storage,
 		workers:  workers,
 		reporter: reporter,
+		skipMD5:  skipMD5,
 	}
 }
 
@@ -35,7 +37,7 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	log.Println("Starting Push synchronization...")
 
 	// 1. Analyze Local
-	localFiles, err := s.fs.ListFiles(rootDir)
+	localFiles, err := s.fs.ListFiles(rootDir, s.skipMD5)
 	if err != nil {
 		return fmt.Errorf("failed to list local files: %w", err)
 	}
@@ -60,8 +62,23 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 		remoteFile, exists := remoteMap[path]
 		if !exists {
 			toUpload = append(toUpload, path)
-		} else if remoteFile.Meta.Checksum != localFile.Checksum {
-			toUpdate = append(toUpdate, path)
+		} else {
+			shouldUpdate := false
+			if s.skipMD5 {
+				// Use ModTime and Size as comparison
+				if remoteFile.Meta.ModTime != localFile.ModTime || remoteFile.Size != localFile.Size {
+					shouldUpdate = true
+				}
+			} else {
+				// Use Checksum
+				if remoteFile.Meta.Checksum != localFile.Checksum {
+					shouldUpdate = true
+				}
+			}
+
+			if shouldUpdate {
+				toUpdate = append(toUpdate, path)
+			}
 		}
 	}
 
@@ -165,7 +182,7 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 
 	// 2. Analyze Local
 	// We need to know what's local to prune or skip
-	localFiles, err := s.fs.ListFiles(rootDir)
+	localFiles, err := s.fs.ListFiles(rootDir, s.skipMD5)
 	if err != nil {
 		// If directory doesn't exist, we might treat it as empty or create it.
 		// For now assume ListFiles handles it or returns error.
@@ -178,7 +195,7 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 			return fmt.Errorf("failed to ensure root dir: %w", err)
 		}
 		// Try listing again
-		localFiles, err = s.fs.ListFiles(rootDir)
+		localFiles, err = s.fs.ListFiles(rootDir, s.skipMD5)
 		if err != nil {
 			return fmt.Errorf("failed to list local files: %w", err)
 		}
@@ -194,8 +211,21 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 		localFile, exists := localMap[path]
 		if !exists {
 			toDownload = append(toDownload, path)
-		} else if localFile.Checksum != remoteFile.Meta.Checksum {
-			toUpdate = append(toUpdate, path)
+		} else {
+			shouldUpdate := false
+			if s.skipMD5 {
+				if localFile.ModTime != remoteFile.Meta.ModTime || localFile.Size != remoteFile.Size {
+					shouldUpdate = true
+				}
+			} else {
+				if localFile.Checksum != remoteFile.Meta.Checksum {
+					shouldUpdate = true
+				}
+			}
+
+			if shouldUpdate {
+				toUpdate = append(toUpdate, path)
+			}
 		}
 	}
 
