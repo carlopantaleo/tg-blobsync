@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"tg-blobsync/internal/domain"
+	"time"
 )
 
 type LocalFileSystem struct{}
@@ -104,6 +105,18 @@ func (l *LocalFileSystem) WriteFile(path string, data io.Reader) error {
 
 	_, err = io.Copy(f, data)
 	return err
+}
+
+func (l *LocalFileSystem) SetModTime(path string, modTime int64) error {
+	if modTime <= 0 {
+		return nil
+	}
+	t := time.Unix(modTime, 0)
+	err := os.Chtimes(path, t, t)
+	if err != nil {
+		return fmt.Errorf("chtimes failed for %s: %w", path, err)
+	}
+	return nil
 }
 
 func (l *LocalFileSystem) DeleteFile(path string) error {

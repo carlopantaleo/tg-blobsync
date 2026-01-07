@@ -54,7 +54,11 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 	remoteMap := make(map[string]domain.RemoteFile)
 	for _, f := range remoteFiles {
-		remoteMap[f.Meta.Path] = f
+		// Telegram returns messages newest-first.
+		// Keep only the first (newest) version of each file.
+		if _, exists := remoteMap[f.Meta.Path]; !exists {
+			remoteMap[f.Meta.Path] = f
+		}
 	}
 
 	// 3. Plan Operations
@@ -181,7 +185,11 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	}
 	remoteMap := make(map[string]domain.RemoteFile)
 	for _, f := range remoteFiles {
-		remoteMap[f.Meta.Path] = f
+		// Telegram returns messages newest-first.
+		// Keep only the first (newest) version of each file.
+		if _, exists := remoteMap[f.Meta.Path]; !exists {
+			remoteMap[f.Meta.Path] = f
+		}
 	}
 
 	// 2. Analyze Local
@@ -280,6 +288,9 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 				if err := s.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
 					return fmt.Errorf("error creating empty file %s: %w", path, err)
 				}
+				if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
+					log.Printf("Warning: failed to set modification time for %s: %v", path, err)
+				}
 				return nil
 			}
 
@@ -291,6 +302,13 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 
 			if err := s.fs.WriteFile(fullPath, rc); err != nil {
 				return fmt.Errorf("error writing file %s: %w", path, err)
+			}
+
+			// Restore original modification time
+			if remoteFile.Meta.ModTime > 0 {
+				if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
+					log.Printf("[!] Warning: failed to set modification time for %s: %v", path, err)
+				}
 			}
 			return nil
 		})

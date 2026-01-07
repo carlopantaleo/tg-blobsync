@@ -40,6 +40,7 @@ type FileSystem interface {
 	ListFiles(root string, skipMD5 bool) ([]LocalFile, error)
 	ReadFile(path string) (io.ReadCloser, error)
 	WriteFile(path string, data io.Reader) error
+	SetModTime(path string, modTime int64) error
 	DeleteFile(path string) error
 	EnsureDir(path string) error
 }
