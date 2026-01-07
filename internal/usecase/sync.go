@@ -93,6 +93,12 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	// Combine upload and update tasks
 	allTasks := append(toUpload, toUpdate...)
 
+	// Use a map to track old remote files that need to be deleted after update
+	updateMap := make(map[string]domain.RemoteFile)
+	for _, path := range toUpdate {
+		updateMap[path] = remoteMap[path]
+	}
+
 	for _, path := range allTasks {
 		path := path
 		localFile := localMap[path]
@@ -107,6 +113,15 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 			err = s.storage.UploadFile(gCtx, groupID, topicID, localFile, f)
 			if err != nil {
 				return fmt.Errorf("error uploading file %s: %w", path, err)
+			}
+
+			// If it was an update, delete the old version AFTER successful upload
+			if oldFile, ok := updateMap[path]; ok {
+				log.Printf("[*] Replacing old version of: %s", path)
+				err := s.storage.DeleteFile(gCtx, groupID, topicID, oldFile.MessageID)
+				if err != nil {
+					log.Printf("Warning: failed to delete old version of %s: %v", path, err)
+				}
 			}
 			return nil
 		})
