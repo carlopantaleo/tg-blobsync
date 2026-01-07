@@ -216,11 +216,16 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	}
 	t.mu.Unlock()
 
+	var uploadSuccess bool
 	defer func() {
 		t.mu.Lock()
 		delete(t.progressStarts, uploadID)
 		if task, ok := t.progressTasks[uploadID]; ok {
-			task.Complete()
+			if uploadSuccess {
+				task.Complete()
+			} else {
+				task.Abort()
+			}
 			delete(t.progressTasks, uploadID)
 		}
 		t.mu.Unlock()
@@ -230,13 +235,20 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	var u tg.InputFileClass
 	var uploadErr error
 
-	// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
-	u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
-		return uploadID, nil
-	}).FromPath(ctx, file.AbsPath)
+	if file.Size == 0 {
+		// Special case for empty files to avoid FILE_PARTS_INVALID
+		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
+			return uploadID, nil
+		}).FromBytes(ctx, filepath.Base(file.Path), []byte{})
+	} else {
+		// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
+		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
+			return uploadID, nil
+		}).FromPath(ctx, file.AbsPath)
+	}
 
 	if uploadErr != nil {
-		return uploadErr
+		return fmt.Errorf("failed to upload raw content: %w", uploadErr)
 	}
 
 	// 2. Preparazione Metadati JSON
@@ -247,7 +259,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	}
 	captionBytes, err := json.Marshal(meta)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 	caption := string(captionBytes)
 
@@ -265,11 +277,13 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 			Filename(filepath.Base(file.Path)),
 		)
 
-	if err == nil {
-		log.Printf("[+] Uploaded: %s", file.Path)
+	if err != nil {
+		return fmt.Errorf("failed to send document message: %w", err)
 	}
 
-	return err
+	uploadSuccess = true
+	log.Printf("[+] Uploaded: %s", file.Path)
+	return nil
 }
 
 // Chunk implements uploader.Progress interface.
@@ -400,13 +414,18 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 		task = t.progressReporter.Start(fileName, size)
 	}
 
+	var downloadSuccess bool
 	go func() {
 		defer func() {
 			t.mu.Lock()
 			delete(t.progressStarts, downloadID)
 			t.mu.Unlock()
 			if task != nil {
-				task.Complete()
+				if downloadSuccess {
+					task.Complete()
+				} else {
+					task.Abort()
+				}
 			}
 		}()
 
@@ -432,6 +451,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 		if err != nil {
 			pw.CloseWithError(err)
 		} else {
+			downloadSuccess = true
 			log.Printf("[+] Downloaded: %s", fileName)
 			pw.Close()
 		}

@@ -15,6 +15,7 @@ type ProgressTask interface {
 	Increment(n int)
 	SetCurrent(current int64)
 	Complete()
+	Abort()
 }
 
 // BlobStorage defines the interface for interacting with the remote storage (Telegram).

@@ -117,11 +117,16 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 
 	for _, path := range allTasks {
+		// Check if context is already canceled to stop scheduling new tasks
+		if gCtx.Err() != nil {
+			break
+		}
+
 		path := path
 		localFile := localMap[path]
 
 		g.Go(func() error {
-			err = s.storage.UploadFile(gCtx, groupID, topicID, localFile)
+			err := s.storage.UploadFile(gCtx, groupID, topicID, localFile)
 			if err != nil {
 				return fmt.Errorf("error uploading file %s: %w", path, err)
 			}
@@ -251,6 +256,11 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	allTasks := append(toDownload, toUpdate...)
 
 	for _, path := range allTasks {
+		// Check if context is already canceled to stop scheduling new tasks
+		if dgCtx.Err() != nil {
+			break
+		}
+
 		path := path
 		remoteFile := remoteMap[path]
 
@@ -262,8 +272,7 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 			defer rc.Close()
 
 			fullPath := filepath.Join(rootDir, path)
-			err = s.fs.WriteFile(fullPath, rc)
-			if err != nil {
+			if err := s.fs.WriteFile(fullPath, rc); err != nil {
 				return fmt.Errorf("error writing file %s: %w", path, err)
 			}
 			return nil

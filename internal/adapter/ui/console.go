@@ -81,6 +81,10 @@ func (t *mpbTask) Complete() {
 	t.bar.SetTotal(-1, true)
 }
 
+func (t *mpbTask) Abort() {
+	t.bar.Abort(true)
+}
+
 type nonInteractiveTask struct {
 	name      string
 	total     int64
@@ -104,6 +108,10 @@ func (t *nonInteractiveTask) Complete() {
 		formatSize(t.current),
 		formatSize(int64(speed)),
 	)
+}
+
+func (t *nonInteractiveTask) Abort() {
+	fmt.Printf("Failed: %s (Transfer aborted due to error)\n", t.name)
 }
 
 func formatSize(b int64) string {
