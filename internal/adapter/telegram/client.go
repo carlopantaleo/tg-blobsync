@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"tg-blobsync/internal/domain"
 
 	"time"
 
@@ -27,7 +28,10 @@ type TelegramClient struct {
 
 	peerCache      map[int64]int64 // map[ChannelID]AccessHash
 	progressStarts map[int64]time.Time
+	progressTasks  map[int64]domain.ProgressTask
 	mu             sync.RWMutex
+
+	progressReporter domain.ProgressReporter
 }
 
 // AuthInput defines an interface for interactive authentication input.
@@ -53,6 +57,7 @@ func NewTelegramClient(appID int, appHash string, sessionFile string, input Auth
 		client:         client,
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
+		progressTasks:  make(map[int64]domain.ProgressTask),
 	}
 
 	return tc, nil
@@ -118,6 +123,12 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 
 func (t *TelegramClient) Close() error {
 	return nil
+}
+
+func (t *TelegramClient) SetProgressReporter(reporter domain.ProgressReporter) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.progressReporter = reporter
 }
 
 func (t *TelegramClient) getAccessHash(id int64) (int64, bool) {

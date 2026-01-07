@@ -7,13 +7,59 @@ import (
 	"tg-blobsync/internal/domain"
 
 	"github.com/manifoldco/promptui"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 )
 
 // ConsoleUI handles user interactions via the terminal.
-type ConsoleUI struct{}
+type ConsoleUI struct {
+	progress *mpb.Progress
+}
 
 func NewConsoleUI() *ConsoleUI {
-	return &ConsoleUI{}
+	return &ConsoleUI{
+		progress: mpb.New(mpb.WithWidth(64)),
+	}
+}
+
+// Progress Reporter Implementation
+
+func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
+	bar := u.progress.AddBar(total,
+		mpb.PrependDecorators(
+			decor.Name(name, decor.WC{W: len(name) + 1}),
+			decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
+		),
+		mpb.AppendDecorators(
+			decor.OnComplete(
+				decor.Percentage(decor.WCSyncSpace), "done",
+			),
+			decor.AverageSpeed(decor.SizeB1024(0), "% .2f", decor.WCSyncSpace),
+		),
+	)
+	return &mpbTask{bar: bar}
+}
+
+func (u *ConsoleUI) Wait() {
+	u.progress.Wait()
+	// Re-initialize progress for next use if needed
+	u.progress = mpb.New(mpb.WithWidth(64))
+}
+
+type mpbTask struct {
+	bar *mpb.Bar
+}
+
+func (t *mpbTask) Increment(n int) {
+	t.bar.IncrBy(n)
+}
+
+func (t *mpbTask) SetCurrent(current int64) {
+	t.bar.SetCurrent(current)
+}
+
+func (t *mpbTask) Complete() {
+	t.bar.SetTotal(-1, true)
 }
 
 // GetPhoneNumber prompts the user for their phone number.

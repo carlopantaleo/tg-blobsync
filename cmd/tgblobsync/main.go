@@ -154,8 +154,9 @@ func main() {
 	}
 
 	// Initialize Core Logic
+	tgClient.SetProgressReporter(console)
 	localFS := filesystem.NewLocalFileSystem()
-	syncer := usecase.NewSynchronizer(localFS, tgClient, workers)
+	syncer := usecase.NewSynchronizer(localFS, tgClient, workers, console)
 
 	// Execute Command
 	switch mode {

@@ -5,6 +5,18 @@ import (
 	"io"
 )
 
+// ProgressReporter defines the interface for reporting progress of file transfers.
+type ProgressReporter interface {
+	Start(name string, total int64) ProgressTask
+	Wait()
+}
+
+type ProgressTask interface {
+	Increment(n int)
+	SetCurrent(current int64)
+	Complete()
+}
+
 // BlobStorage defines the interface for interacting with the remote storage (Telegram).
 type BlobStorage interface {
 	// Auth & Selection
@@ -19,6 +31,7 @@ type BlobStorage interface {
 
 	// Lifecycle
 	Close() error
+	SetProgressReporter(reporter ProgressReporter)
 }
 
 // FileSystem defines the interface for interacting with the local filesystem.

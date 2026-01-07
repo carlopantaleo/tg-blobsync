@@ -12,19 +12,21 @@ import (
 )
 
 type Synchronizer struct {
-	fs      domain.FileSystem
-	storage domain.BlobStorage
-	workers int
+	fs       domain.FileSystem
+	storage  domain.BlobStorage
+	workers  int
+	reporter domain.ProgressReporter
 }
 
-func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int) *Synchronizer {
+func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int, reporter domain.ProgressReporter) *Synchronizer {
 	if workers <= 0 {
 		workers = 1
 	}
 	return &Synchronizer{
-		fs:      fs,
-		storage: storage,
-		workers: workers,
+		fs:       fs,
+		storage:  storage,
+		workers:  workers,
+		reporter: reporter,
 	}
 }
 
@@ -112,6 +114,10 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 
 	if err := g.Wait(); err != nil {
 		return err
+	}
+
+	if s.reporter != nil {
+		s.reporter.Wait()
 	}
 
 	// 5. Pruning (Delete from remote if not in local)
@@ -227,6 +233,10 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 
 	if err := dg.Wait(); err != nil {
 		return err
+	}
+
+	if s.reporter != nil {
+		s.reporter.Wait()
 	}
 
 	// 5. Pruning (Delete local if not in remote)

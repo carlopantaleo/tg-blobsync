@@ -207,14 +207,22 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 
 	log.Printf("[...] Uploading: %s (%s)", file.Path, formatSize(file.Size))
 
-	// Track start time for speed calculation
+	// Track start time for speed calculation and create progress task
 	uploadID, _ := crypto.RandInt64(crypto.DefaultRand())
 	t.mu.Lock()
 	t.progressStarts[uploadID] = time.Now()
+	if t.progressReporter != nil {
+		t.progressTasks[uploadID] = t.progressReporter.Start(file.Path, file.Size)
+	}
 	t.mu.Unlock()
+
 	defer func() {
 		t.mu.Lock()
 		delete(t.progressStarts, uploadID)
+		if task, ok := t.progressTasks[uploadID]; ok {
+			task.Complete()
+			delete(t.progressTasks, uploadID)
+		}
 		t.mu.Unlock()
 	}()
 
@@ -260,15 +268,20 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 
 // Chunk implements uploader.Progress interface.
 func (t *TelegramClient) Chunk(ctx context.Context, state uploader.ProgressState) error {
+	t.mu.RLock()
+	task, hasTask := t.progressTasks[state.ID]
+	startTime, hasStart := t.progressStarts[state.ID]
+	t.mu.RUnlock()
+
+	if hasTask {
+		task.SetCurrent(state.Uploaded)
+	}
+
 	if state.Total > 0 {
 		percent := float64(state.Uploaded) / float64(state.Total) * 100
 
-		t.mu.RLock()
-		startTime, ok := t.progressStarts[state.ID]
-		t.mu.RUnlock()
-
 		speedStr := ""
-		if ok {
+		if hasStart {
 			elapsed := time.Since(startTime).Seconds()
 			if elapsed > 0 {
 				speed := float64(state.Uploaded) / elapsed
@@ -276,9 +289,11 @@ func (t *TelegramClient) Chunk(ctx context.Context, state uploader.ProgressState
 			}
 		}
 
-		// Log ogni 5MB o al completamento per non intasare i log
-		if state.Uploaded == state.Total || state.Uploaded%(5*1024*1024) < int64(state.PartSize) {
-			log.Printf("  [%s] %.1f%% (%s/%s)%s", state.Name, percent, formatSize(state.Uploaded), formatSize(state.Total), speedStr)
+		// Log only if no interactive reporter is active
+		if t.progressReporter == nil {
+			if state.Uploaded == state.Total || state.Uploaded%(5*1024*1024) < int64(state.PartSize) {
+				log.Printf("  [%s] %.1f%% (%s/%s)%s", state.Name, percent, formatSize(state.Uploaded), formatSize(state.Total), speedStr)
+			}
 		}
 	}
 	return nil
@@ -374,11 +389,19 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	// Pipe per lo streaming
 	pr, pw := io.Pipe()
 
+	var task domain.ProgressTask
+	if t.progressReporter != nil {
+		task = t.progressReporter.Start(fileName, size)
+	}
+
 	go func() {
 		defer func() {
 			t.mu.Lock()
 			delete(t.progressStarts, downloadID)
 			t.mu.Unlock()
+			if task != nil {
+				task.Complete()
+			}
 		}()
 
 		// Create a custom writer that tracks progress and writes to pw
@@ -390,6 +413,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			total:     size,
 			lastLog:   0,
 			startTime: time.Now(),
+			task:      task,
 		}
 
 		// gotd downloader
@@ -418,19 +442,23 @@ type trackingWriter struct {
 	uploaded  int64
 	lastLog   int64
 	startTime time.Time
+	task      domain.ProgressTask
 }
 
 func (tw *trackingWriter) Write(p []byte) (n int, err error) {
 	n, err = tw.w.Write(p)
 	if n > 0 {
 		tw.uploaded += int64(n)
+		if tw.task != nil {
+			tw.task.Increment(n)
+		}
 		tw.report()
 	}
 	return n, err
 }
 
 func (tw *trackingWriter) report() {
-	if tw.total <= 0 {
+	if tw.total <= 0 || tw.t.progressReporter != nil {
 		return
 	}
 

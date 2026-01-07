@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/gotd/td v0.136.1-0.20260106131755-131dfb772aa5
 	github.com/manifoldco/promptui v0.9.0
+	github.com/vbauerster/mpb/v8 v8.11.3
 	golang.org/x/sync v0.19.0
 )
 
@@ -34,7 +35,6 @@ require (
 	github.com/ogen-go/ogen v1.16.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/vbauerster/mpb/v8 v8.11.3 // indirect
 	go.opentelemetry.io/otel v1.39.0 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
