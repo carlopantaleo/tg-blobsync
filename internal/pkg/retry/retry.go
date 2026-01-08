@@ -2,7 +2,6 @@ package retry
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -33,9 +32,11 @@ func WithRetry(ctx context.Context, name string, op Operation, maxRetries int, b
 		lastErr = err
 		log.Printf("[!] Error during %s (attempt %d/%d): %v", name, attempt, maxRetries, err)
 
-		// Don't retry if context is cancelled or deadline exceeded
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return err
+		// Don't retry if the parent context is cancelled or deadline exceeded.
+		// If the error is context.Canceled but ctx.Err() is nil, it means
+		// an internal context was canceled, which might be retryable.
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 	return fmt.Errorf("%s failed after %d attempts: %w", name, maxRetries, lastErr)

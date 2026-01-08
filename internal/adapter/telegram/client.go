@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -59,7 +60,7 @@ func NewTelegramClient(appID int, appHash string, sessionFile string, input Auth
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
-		uploadThreads:  8, // Default
+		uploadThreads:  4,
 	}
 
 	return tc, nil
@@ -85,21 +86,24 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 	ready := make(chan error, 1)
 
 	go func() {
+		log.Println("[Telegram] Starting client run loop...")
 		err := t.client.Run(ctx, func(ctx context.Context) error {
 			// Auth flow
 			status, err := t.client.Auth().Status(ctx)
 			if err != nil {
-				return err
+				return fmt.Errorf("auth status check failed: %w", err)
 			}
 
 			if !status.Authorized {
+				log.Println("[Telegram] Not authorized, starting auth flow...")
 				flow := auth.NewFlow(
 					termAuth{input: input},
 					auth.SendCodeOptions{},
 				)
 				if err := t.client.Auth().IfNecessary(ctx, flow); err != nil {
-					return err
+					return fmt.Errorf("auth flow failed: %w", err)
 				}
+				log.Println("[Telegram] Authorization successful")
 			}
 
 			// Initialize helpers
@@ -117,15 +121,20 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 			}
 
 			// Block until context done to keep connection alive
+			log.Println("[Telegram] Client is ready and connected")
 			<-ctx.Done()
+			log.Println("[Telegram] Client run loop context done")
 			return ctx.Err()
 		})
 		if err != nil {
+			log.Printf("[Telegram] Client run loop exited with error: %v", err)
 			// If Run returns error immediately
 			select {
 			case ready <- err:
 			default:
 			}
+		} else {
+			log.Println("[Telegram] Client run loop exited cleanly")
 		}
 	}()
 

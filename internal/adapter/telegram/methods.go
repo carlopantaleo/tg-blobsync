@@ -208,38 +208,31 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 
 	log.Printf("[...] Uploading: %s (%s)", file.Path, formatSize(file.Size))
 
-	// Track start time for speed calculation and create progress task
-	uploadID, _ := crypto.RandInt64(crypto.DefaultRand())
-	t.mu.Lock()
-	t.progressStarts[uploadID] = time.Now()
-	if t.progressReporter != nil {
-		t.progressTasks[uploadID] = t.progressReporter.Start(file.Path, file.Size)
-	}
-	t.mu.Unlock()
-
-	var uploadSuccess bool
-	defer func() {
-		t.mu.Lock()
-		delete(t.progressStarts, uploadID)
-		if task, ok := t.progressTasks[uploadID]; ok {
-			if uploadSuccess {
-				task.Complete()
-			} else {
-				task.Abort()
-			}
-			delete(t.progressTasks, uploadID)
-		}
-		t.mu.Unlock()
-	}()
+	var task domain.ProgressTask
 
 	err := retry.WithRetry(ctx, "UploadFile: "+file.Path, func() error {
-		// Reset progress on retry
+		// 0. Generate a fresh upload ID for each retry to ensure a clean state
+		uploadID, _ := crypto.RandInt64(crypto.DefaultRand())
+
 		t.mu.Lock()
-		if task, ok := t.progressTasks[uploadID]; ok {
-			task.SetCurrent(0)
-		}
 		t.progressStarts[uploadID] = time.Now()
+		if t.progressReporter != nil {
+			// If we already had a task from a previous attempt, abort it before starting a new one
+			if task != nil {
+				task.Abort()
+			}
+			task = t.progressReporter.Start(file.Path, file.Size)
+			t.progressTasks[uploadID] = task
+		}
 		t.mu.Unlock()
+
+		// Ensure we clean up progress tracking for this ID if this attempt fails
+		defer func() {
+			t.mu.Lock()
+			delete(t.progressStarts, uploadID)
+			delete(t.progressTasks, uploadID)
+			t.mu.Unlock()
+		}()
 
 		// 1. Raw content upload
 		var u tg.InputFileClass
@@ -298,10 +291,15 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	}, 5, 1*time.Second)
 
 	if err != nil {
+		if task != nil {
+			task.Abort()
+		}
 		return err
 	}
 
-	uploadSuccess = true
+	if task != nil {
+		task.Complete()
+	}
 	log.Printf("[+] Uploaded: %s", file.Path)
 	return nil
 }
