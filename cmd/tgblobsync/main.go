@@ -36,6 +36,7 @@ func main() {
 		verbose        bool
 		skipMD5        bool
 		nonInteractive bool
+		subDir         string
 	)
 
 	// Helper to setup common flags
@@ -43,6 +44,7 @@ func main() {
 		f.Int64Var(&groupID, "group-id", 0, "ID of the Supergroup")
 		f.Int64Var(&topicID, "topic-id", 0, "ID of the Topic")
 		f.StringVar(&dirPath, "dir", "", "Path to the directory to sync")
+		f.StringVar(&subDir, "sub-dir", "", "Synchronize only a specific subdirectory within the topic")
 		f.IntVar(&workers, "workers", 4, "Number of concurrent files")
 		f.IntVar(&uploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 		f.BoolVar(&verbose, "verbose", false, "Enable verbose output")
@@ -176,6 +178,7 @@ func main() {
 	tgClient.SetProgressReporter(console)
 	localFS := filesystem.NewLocalFileSystem()
 	syncer := usecase.NewSynchronizer(localFS, tgClient, workers, console, skipMD5)
+	syncer.SetSubDir(subDir)
 
 	// Execute Command
 	switch mode {

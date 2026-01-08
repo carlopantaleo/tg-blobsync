@@ -20,6 +20,7 @@ type Synchronizer struct {
 	workers  int
 	reporter domain.ProgressReporter
 	skipMD5  bool
+	subDir   string
 }
 
 func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int, reporter domain.ProgressReporter, skipMD5 bool) *Synchronizer {
@@ -35,6 +36,13 @@ func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers i
 	}
 }
 
+func (s *Synchronizer) SetSubDir(subDir string) {
+	// Ensure subDir uses forward slashes and has no leading/trailing slashes for consistent matching
+	subDir = filepath.ToSlash(subDir)
+	subDir = strings.Trim(subDir, "/")
+	s.subDir = subDir
+}
+
 // Push synchronizes local folder to remote topic.
 func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicID int64) error {
 	log.Println("Starting Push synchronization...")
@@ -46,6 +54,12 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 	localMap := make(map[string]domain.LocalFile)
 	for _, f := range localFiles {
+		if s.subDir != "" {
+			// Only include files that are within the subDir
+			if !strings.HasPrefix(filepath.ToSlash(f.Path), s.subDir+"/") && filepath.ToSlash(f.Path) != s.subDir {
+				continue
+			}
+		}
 		localMap[f.Path] = f
 	}
 
@@ -56,6 +70,13 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 	remoteMap := make(map[string]domain.RemoteFile)
 	for _, f := range remoteFiles {
+		if s.subDir != "" {
+			// Only include files that are within the subDir
+			relPath := filepath.ToSlash(f.Meta.Path)
+			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
+				continue
+			}
+		}
 		// Telegram returns messages newest-first.
 		// Keep only the first (newest) version of each file.
 		if _, exists := remoteMap[f.Meta.Path]; !exists {
@@ -187,6 +208,13 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	}
 	remoteMap := make(map[string]domain.RemoteFile)
 	for _, f := range remoteFiles {
+		if s.subDir != "" {
+			// Only include files that are within the subDir
+			relPath := filepath.ToSlash(f.Meta.Path)
+			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
+				continue
+			}
+		}
 		// Telegram returns messages newest-first.
 		// Keep only the first (newest) version of each file.
 		if _, exists := remoteMap[f.Meta.Path]; !exists {
@@ -216,6 +244,13 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	}
 	localMap := make(map[string]domain.LocalFile)
 	for _, f := range localFiles {
+		if s.subDir != "" {
+			// Only include files that are within the subDir
+			relPath := filepath.ToSlash(f.Path)
+			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
+				continue
+			}
+		}
 		localMap[f.Path] = f
 	}
 
