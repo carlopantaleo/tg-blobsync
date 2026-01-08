@@ -2,6 +2,8 @@
 
 TG-BlobSync is a powerful CLI tool written in go, designed to synchronize local directories with Telegram Forum Topics. It uses Telegram as a blob storage, allowing you to back up and sync files efficiently.
 
+This is a conceptual tool to demonstrate the feasibility of using Telegram as a free unlimited blob storage for files. Please bear in mind that Telegram is not intended to be used as a blob storage and I strongly recommend against using it for production purposes.
+
 ## Features
 
 - **Bidirectional Sync**: Supports `push` (local to Telegram) and `pull` (Telegram to local) operations.
