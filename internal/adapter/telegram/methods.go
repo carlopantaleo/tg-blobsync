@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"tg-blobsync/internal/domain"
+	"tg-blobsync/internal/pkg/retry"
 
 	"time"
 
@@ -231,58 +232,73 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		t.mu.Unlock()
 	}()
 
-	// 1. Raw content upload
-	var u tg.InputFileClass
-	var uploadErr error
+	err := retry.WithRetry(ctx, "UploadFile: "+file.Path, func() error {
+		// Reset progress on retry
+		t.mu.Lock()
+		if task, ok := t.progressTasks[uploadID]; ok {
+			task.SetCurrent(0)
+		}
+		t.progressStarts[uploadID] = time.Now()
+		t.mu.Unlock()
 
-	// Special case for empty files: Telegram rejects 0-byte files.
-	// We upload a 1-byte dummy file and mark it with a flag.
-	if file.Size == 0 {
-		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
-			return uploadID, nil
-		}).FromBytes(ctx, filepath.Base(file.Path), []byte{0})
-	} else {
-		// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
-		u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
-			return uploadID, nil
-		}).FromPath(ctx, file.AbsPath)
-	}
+		// 1. Raw content upload
+		var u tg.InputFileClass
+		var uploadErr error
 
-	if uploadErr != nil {
-		return fmt.Errorf("failed to upload raw content: %w", uploadErr)
-	}
+		// Special case for empty files: Telegram rejects 0-byte files.
+		// We upload a 1-byte dummy file and mark it with a flag.
+		if file.Size == 0 {
+			u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
+				return uploadID, nil
+			}).FromBytes(ctx, filepath.Base(file.Path), []byte{0})
+		} else {
+			// If it's a file from disk, use uploader.FromPath for potential optimizations (like random access for concurrent parts)
+			u, uploadErr = t.uploader.WithIDGenerator(func() (int64, error) {
+				return uploadID, nil
+			}).FromPath(ctx, file.AbsPath)
+		}
 
-	// 2. JSON Metadata preparation
-	meta := domain.FileMeta{
-		Path:     file.Path,
-		Checksum: file.Checksum,
-		ModTime:  file.ModTime,
-	}
-	if file.Size == 0 {
-		meta.Flags = "EMPTY_FILE"
-	}
-	captionBytes, err := json.Marshal(meta)
+		if uploadErr != nil {
+			return fmt.Errorf("failed to upload raw content: %w", uploadErr)
+		}
+
+		// 2. JSON Metadata preparation
+		meta := domain.FileMeta{
+			Path:     file.Path,
+			Checksum: file.Checksum,
+			ModTime:  file.ModTime,
+		}
+		if file.Size == 0 {
+			meta.Flags = "EMPTY_FILE"
+		}
+		captionBytes, err := json.Marshal(meta)
+		if err != nil {
+			return fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+		caption := string(captionBytes)
+
+		// 3. MIME type determination
+		mimeType := mime.TypeByExtension(filepath.Ext(file.Path))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+
+		// 4. Send Message with Document
+		_, err = t.sender.To(inputPeer).
+			Reply(int(topicID)).
+			Media(ctx, message.UploadedDocument(u, styling.Plain(caption)).
+				MIME(mimeType).
+				Filename(filepath.Base(file.Path)),
+			)
+
+		if err != nil {
+			return fmt.Errorf("failed to send document message: %w", err)
+		}
+		return nil
+	}, 5, 1*time.Second)
+
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-	caption := string(captionBytes)
-
-	// 3. MIME type determination
-	mimeType := mime.TypeByExtension(filepath.Ext(file.Path))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-
-	// 4. Send Message with Document
-	_, err = t.sender.To(inputPeer).
-		Reply(int(topicID)).
-		Media(ctx, message.UploadedDocument(u, styling.Plain(caption)).
-			MIME(mimeType).
-			Filename(filepath.Base(file.Path)),
-		)
-
-	if err != nil {
-		return fmt.Errorf("failed to send document message: %w", err)
+		return err
 	}
 
 	uploadSuccess = true
@@ -362,36 +378,38 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	t.progressStarts[downloadID] = time.Now()
 	t.mu.Unlock()
 
-	// Fetch message to get file location
-	msgs, err := t.api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
-		Channel: &tg.InputChannel{
-			ChannelID:  groupID,
-			AccessHash: accessHash,
-		},
-		ID: []tg.InputMessageClass{&tg.InputMessageID{ID: messageID}},
-	})
-	if err != nil {
-		t.mu.Lock()
-		delete(t.progressStarts, downloadID)
-		t.mu.Unlock()
-		return nil, err
-	}
-
 	var msg *tg.Message
-	switch m := msgs.(type) {
-	case *tg.MessagesChannelMessages:
-		if len(m.Messages) > 0 {
-			if mm, ok := m.Messages[0].(*tg.Message); ok {
-				msg = mm
+	{
+		err := retry.WithRetry(ctx, "DownloadFile setup: "+fileName, func() error {
+			msgs, err := t.api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+				Channel: &tg.InputChannel{
+					ChannelID:  groupID,
+					AccessHash: accessHash,
+				},
+				ID: []tg.InputMessageClass{&tg.InputMessageID{ID: messageID}},
+			})
+			if err != nil {
+				return err
 			}
-		}
-	}
 
-	if msg == nil {
-		t.mu.Lock()
-		delete(t.progressStarts, downloadID)
-		t.mu.Unlock()
-		return nil, errors.New("message not found")
+			switch m := msgs.(type) {
+			case *tg.MessagesChannelMessages:
+				if len(m.Messages) > 0 {
+					if mm, ok := m.Messages[0].(*tg.Message); ok {
+						msg = mm
+						return nil
+					}
+				}
+			}
+			return errors.New("message not found or invalid type")
+		}, 5, 1*time.Second)
+
+		if err != nil {
+			t.mu.Lock()
+			delete(t.progressStarts, downloadID)
+			t.mu.Unlock()
+			return nil, err
+		}
 	}
 
 	doc, ok := msg.Media.(*tg.MessageMediaDocument)

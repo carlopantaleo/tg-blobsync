@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"tg-blobsync/internal/domain"
+	"tg-blobsync/internal/pkg/retry"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -283,34 +285,40 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 
 		dg.Go(func() error {
 			fullPath := filepath.Join(rootDir, path)
-			if remoteFile.Meta.Flags == "EMPTY_FILE" {
-				log.Printf("[*] Restoring empty file: %s", path)
-				if err := s.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
-					return fmt.Errorf("error creating empty file %s: %w", path, err)
+
+			operation := func() error {
+				if remoteFile.Meta.Flags == "EMPTY_FILE" {
+					log.Printf("[*] Restoring empty file: %s", path)
+					if err := s.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
+						return fmt.Errorf("error creating empty file %s: %w", path, err)
+					}
+					if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
+						log.Printf("Warning: failed to set modification time for %s: %v", path, err)
+					}
+					return nil
 				}
-				if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
-					log.Printf("Warning: failed to set modification time for %s: %v", path, err)
+
+				rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID, remoteFile.Meta.Path, remoteFile.Size)
+				if err != nil {
+					return fmt.Errorf("error downloading file %s: %w", path, err)
+				}
+				defer rc.Close()
+
+				if err := s.fs.WriteFile(fullPath, rc); err != nil {
+					return fmt.Errorf("error writing file %s: %w", path, err)
+				}
+
+				// Restore original modification time
+				if remoteFile.Meta.ModTime > 0 {
+					if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
+						log.Printf("[!] Warning: failed to set modification time for %s: %v", path, err)
+					}
 				}
 				return nil
 			}
 
-			rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID, remoteFile.Meta.Path, remoteFile.Size)
-			if err != nil {
-				return fmt.Errorf("error downloading file %s: %w", path, err)
-			}
-			defer rc.Close()
-
-			if err := s.fs.WriteFile(fullPath, rc); err != nil {
-				return fmt.Errorf("error writing file %s: %w", path, err)
-			}
-
-			// Restore original modification time
-			if remoteFile.Meta.ModTime > 0 {
-				if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
-					log.Printf("[!] Warning: failed to set modification time for %s: %v", path, err)
-				}
-			}
-			return nil
+			// Retry logic for download and write using centralized utility
+			return retry.WithRetry(dgCtx, "Pull: "+path, operation, 5, 1*time.Second)
 		})
 	}
 
