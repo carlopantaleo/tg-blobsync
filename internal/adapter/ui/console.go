@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"tg-blobsync/internal/domain"
@@ -327,15 +328,22 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 		for d := range items {
 			sortedDirs = append(sortedDirs, d)
 		}
+		sort.Strings(sortedDirs)
+
 		for _, d := range sortedDirs {
 			info := items[d]
-			label := fmt.Sprintf("\U0001F4C1 %s (%s)", d, formatSize(info.Size))
+			label := fmt.Sprintf("\U0001F4C1 %-30s %10s", d, formatSize(info.Size))
 			menu = append(menu, menuEntry{Label: label, IsDir: true, DirName: d})
 		}
 
 		// Add files
+		sort.Slice(filesInDir, func(i, j int) bool {
+			return filepath.Base(filesInDir[i].Meta.Path) < filepath.Base(filesInDir[j].Meta.Path)
+		})
+
 		for _, f := range filesInDir {
-			label := fmt.Sprintf("\U0001F4C4 %s (%s)", filepath.Base(f.Meta.Path), formatSize(f.Size))
+			modTime := time.Unix(f.Meta.ModTime, 0).Format("2006-01-02 15:04:05")
+			label := fmt.Sprintf("\U0001F4C4 %-30s %10s  %s", filepath.Base(f.Meta.Path), formatSize(f.Size), modTime)
 			menu = append(menu, menuEntry{Label: label, IsDir: false, File: &f})
 		}
 
