@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"tg-blobsync/internal/domain"
@@ -259,4 +260,156 @@ func (u *ConsoleUI) PromptInt(label string) (int64, error) {
 		return 0, err
 	}
 	return strconv.ParseInt(res, 10, 64)
+}
+
+// BrowseFiles allows interactive navigation of the virtual directory structure.
+func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
+	if len(files) == 0 {
+		fmt.Println("No files to browse.")
+		return nil
+	}
+
+	currentDir := ""
+	for {
+		// Filter items in current directory
+		type dirInfo struct {
+			Size  int64
+			IsDir bool
+		}
+		items := make(map[string]*dirInfo) // name -> info
+		var filesInDir []domain.RemoteFile
+		var currentDirTotalSize int64
+
+		for _, f := range files {
+			path := filepath.ToSlash(f.Meta.Path)
+			if currentDir == "" {
+				parts := strings.Split(path, "/")
+				if len(parts) > 1 {
+					if _, ok := items[parts[0]]; !ok {
+						items[parts[0]] = &dirInfo{IsDir: true}
+					}
+					items[parts[0]].Size += f.Size
+				} else {
+					filesInDir = append(filesInDir, f)
+				}
+				currentDirTotalSize += f.Size
+			} else {
+				if strings.HasPrefix(path, currentDir+"/") {
+					relPath := strings.TrimPrefix(path, currentDir+"/")
+					parts := strings.Split(relPath, "/")
+					if len(parts) > 1 {
+						if _, ok := items[parts[0]]; !ok {
+							items[parts[0]] = &dirInfo{IsDir: true}
+						}
+						items[parts[0]].Size += f.Size
+					} else {
+						filesInDir = append(filesInDir, f)
+					}
+					currentDirTotalSize += f.Size
+				}
+			}
+		}
+
+		type menuEntry struct {
+			Label   string
+			IsDir   bool
+			DirName string
+			File    *domain.RemoteFile
+		}
+
+		var menu []menuEntry
+		if currentDir != "" {
+			menu = append(menu, menuEntry{Label: ".. [Go Up]", IsDir: true})
+		}
+
+		// Add directories
+		var sortedDirs []string
+		for d := range items {
+			sortedDirs = append(sortedDirs, d)
+		}
+		for _, d := range sortedDirs {
+			info := items[d]
+			label := fmt.Sprintf("\U0001F4C1 %s (%s)", d, formatSize(info.Size))
+			menu = append(menu, menuEntry{Label: label, IsDir: true, DirName: d})
+		}
+
+		// Add files
+		for _, f := range filesInDir {
+			label := fmt.Sprintf("\U0001F4C4 %s (%s)", filepath.Base(f.Meta.Path), formatSize(f.Size))
+			menu = append(menu, menuEntry{Label: label, IsDir: false, File: &f})
+		}
+
+		menu = append(menu, menuEntry{Label: "Exit Browser", IsDir: false})
+
+		displayDir := currentDir
+		if displayDir == "" {
+			displayDir = "/"
+		}
+
+		templates := &promptui.SelectTemplates{
+			Label:    fmt.Sprintf("Current directory: %s (%s)", displayDir, formatSize(currentDirTotalSize)),
+			Active:   "\U0001F449 {{ .Label | cyan }}",
+			Inactive: "  {{ .Label | white }}",
+			Selected: "{{ if .File }}\U0001F44D {{ .Label | green }}{{ else }}\U0001F44D {{ .Label | yellow }}{{ end }}",
+		}
+
+		prompt := promptui.Select{
+			Label:     "Browse Files",
+			Items:     menu,
+			Templates: templates,
+			Size:      15,
+		}
+
+		idx, _, err := prompt.Run()
+		if err != nil {
+			return err
+		}
+
+		selected := menu[idx]
+		if selected.Label == "Exit Browser" {
+			return nil
+		}
+
+		if selected.IsDir {
+			if selected.Label == ".. [Go Up]" {
+				parts := strings.Split(currentDir, "/")
+				if len(parts) <= 1 {
+					currentDir = ""
+				} else {
+					currentDir = strings.Join(parts[:len(parts)-1], "/")
+				}
+				continue
+			}
+
+			dirName := selected.DirName
+			if currentDir == "" {
+				currentDir = dirName
+			} else {
+				currentDir = currentDir + "/" + dirName
+			}
+			continue
+		}
+
+		if selected.File != nil {
+			f := selected.File
+			fmt.Printf("\n--- File Details ---\n")
+			fmt.Printf("Path:     %s\n", f.Meta.Path)
+			fmt.Printf("Size:     %s\n", formatSize(f.Size))
+			fmt.Printf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339))
+			if f.Meta.Checksum != "" {
+				fmt.Printf("Checksum: %s\n", f.Meta.Checksum)
+			}
+			if f.Meta.Flags != "" {
+				fmt.Printf("Flags:    %s\n", f.Meta.Flags)
+			}
+			fmt.Printf("MsgID:    %d\n", f.MessageID)
+			fmt.Printf("--------------------\n\n")
+
+			promptContinue := promptui.Prompt{
+				Label:     "Press Enter to continue browsing",
+				IsConfirm: false,
+			}
+			promptContinue.Run()
+		}
+	}
 }

@@ -7,6 +7,7 @@ This is a conceptual tool to demonstrate the feasibility of using Telegram as a 
 ## Features
 
 - **Bidirectional Sync**: Supports `push` (local to Telegram) and `pull` (Telegram to local) operations.
+- **Interactive Browser**: Navigate and explore virtual directories and files in a topic using the `list` command.
 - **Efficient Synchronization**: Compare files using MD5 checksums or modification time (`--skip-md5`).
 - **High Performance**: Multithreaded file processing and parallelized chunk uploads for large files.
 - **Telegram Forum Support**: Organizes files within specific Supergroup Topics.
@@ -54,18 +55,26 @@ Downloads files from a Telegram Topic to a local directory interactively.
 tgblobsync pull --dir ./restore-folder
 ```
 
+#### List (Interactive Browser)
+
+Explores the virtual directory structure within a Telegram Topic.
+
+```bash
+tgblobsync list [ --group-id <ID> [ --topic-id <ID> ] ]
+```
+
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--dir` | Path to the directory to sync (Required) | - |
+| `--dir` | Path to the directory to sync (Required for push/pull) | - |
+| `--sub-dir` | Synchronize only a specific subdirectory within the topic | - |
 | `--group-id` | ID of the Supergroup | Interactive selection |
 | `--topic-id` | ID of the Topic (TopID) | Interactive selection |
 | `--workers` | Number of concurrent files to process | 4 |
 | `--upload-threads` | Number of parallel threads for a single file upload | 8 |
 | `--skip-md5` | Use modification time and size instead of MD5 checksums | false |
 | `--non-interactive` | Disable interactive UI and progress bars | false |
-| `--verbose` | Enable verbose output | false |
 
 ## How it works
 
