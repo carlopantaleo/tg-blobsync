@@ -135,6 +135,17 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 		return nil
 	}
 
+	if s.reporter != nil {
+		confirmed, err := s.reporter.ConfirmSync(toUpload, toUpdate, toDelete)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			log.Println("Sync cancelled by user.")
+			return nil
+		}
+	}
+
 	// 4. Upload & Update (Upsert)
 	// Combine upload and update tasks
 	allTasks := append(toUpload, toUpdate...)
@@ -304,6 +315,17 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	if len(toDownload)+len(toUpdate)+len(toDelete) == 0 {
 		log.Println("Everything is up to date.")
 		return nil
+	}
+
+	if s.reporter != nil {
+		confirmed, err := s.reporter.ConfirmSync(toDownload, toUpdate, toDelete)
+		if err != nil {
+			return err
+		}
+		if !confirmed {
+			log.Println("Sync cancelled by user.")
+			return nil
+		}
 	}
 
 	// 4. Download

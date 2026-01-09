@@ -10,6 +10,7 @@ type ProgressReporter interface {
 	SetTotalFiles(total int)
 	Start(name string, total int64) ProgressTask
 	Wait()
+	ConfirmSync(toUpload, toUpdate, toDelete []string) (bool, error)
 }
 
 type ProgressTask interface {
