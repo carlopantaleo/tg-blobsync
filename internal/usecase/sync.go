@@ -163,9 +163,9 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 				return fmt.Errorf("error uploading file %s: %w", path, err)
 			}
 
-			// If it was an update, delete the old version AFTER successful upload
+			// If it was an update, delete the old version
 			if oldFile, ok := updateMap[path]; ok {
-				log.Printf("[*] Replacing old version of: %s", path)
+				log.Printf("[*] Deleting old version of: %s", path)
 				err := s.storage.DeleteFile(gCtx, groupID, topicID, oldFile.MessageID)
 				if err != nil {
 					log.Printf("Warning: failed to delete old version of %s: %v", path, err)
