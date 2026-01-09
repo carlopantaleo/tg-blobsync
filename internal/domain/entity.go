@@ -35,3 +35,38 @@ type Topic struct {
 	ID    int64
 	Title string
 }
+
+// SyncActionType defines the type of synchronization action.
+type SyncActionType string
+
+const (
+	ActionUpload       SyncActionType = "UPLOAD"
+	ActionDownload     SyncActionType = "DOWNLOAD"
+	ActionDeleteRemote SyncActionType = "DELETE_REMOTE"
+	ActionDeleteLocal  SyncActionType = "DELETE_LOCAL"
+	ActionSkip         SyncActionType = "SKIP"
+)
+
+// SyncItem represents a single file synchronization task.
+type SyncItem struct {
+	Path       string
+	Action     SyncActionType
+	LocalFile  *LocalFile
+	RemoteFile *RemoteFile
+	Reason     string
+}
+
+// SyncPlan represents the complete set of actions to synchronize files.
+type SyncPlan struct {
+	Items   []SyncItem
+	Summary SyncSummary
+}
+
+// SyncSummary contains the counts of actions in a plan.
+type SyncSummary struct {
+	ToUpload   int
+	ToDownload int
+	ToUpdate   int
+	ToDelete   int
+	Total      int
+}

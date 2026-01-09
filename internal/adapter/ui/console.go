@@ -103,7 +103,7 @@ func (u *ConsoleUI) Wait() {
 	u.progress = mpb.New(mpb.WithWidth(64))
 }
 
-func (u *ConsoleUI) ConfirmSync(toUpload, toUpdate, toDelete []string) (bool, error) {
+func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 	if u.nonInteractive {
 		return true, nil
 	}
@@ -127,30 +127,57 @@ func (u *ConsoleUI) ConfirmSync(toUpload, toUpdate, toDelete []string) (bool, er
 		case 0: // Start Transfer
 			return true, nil
 		case 1: // Show Detailed Changes
-			fmt.Println("\n--- Detailed Changes ---")
-			if len(toUpload) > 0 {
-				fmt.Println("\nNew Files:")
-				for _, f := range toUpload {
-					fmt.Printf("  [+] %s\n", f)
-				}
-			}
-			if len(toUpdate) > 0 {
-				fmt.Println("\nUpdated Files:")
-				for _, f := range toUpdate {
-					fmt.Printf("  [*] %s\n", f)
-				}
-			}
-			if len(toDelete) > 0 {
-				fmt.Println("\nRemoved Files:")
-				for _, f := range toDelete {
-					fmt.Printf("  [-] %s\n", f)
-				}
-			}
-			fmt.Println("------------------------")
+			u.showDetailedChanges(plan)
 		case 2: // Cancel/Exit
 			return false, nil
 		}
 	}
+}
+
+func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
+	fmt.Println("\n--- Detailed Changes ---")
+
+	fmt.Println("\nActions:")
+	for _, item := range plan.Items {
+		symbol := "?"
+		actionName := ""
+
+		switch item.Action {
+		case domain.ActionUpload:
+			if item.RemoteFile != nil {
+				symbol = "[*] Update"
+				actionName = "Upload (update)"
+			} else {
+				symbol = "[+] New   "
+				actionName = "Upload (new)"
+			}
+		case domain.ActionDownload:
+			if item.LocalFile != nil {
+				symbol = "[*] Update"
+				actionName = "Download (update)"
+			} else {
+				symbol = "[v] New   "
+				actionName = "Download (new)"
+			}
+		case domain.ActionDeleteRemote:
+			symbol = "[-] Delete"
+			actionName = "Delete Remote"
+		case domain.ActionDeleteLocal:
+			symbol = "[-] Delete"
+			actionName = "Delete Local"
+		case domain.ActionSkip:
+			symbol = "[.] Skip  "
+			actionName = "Skip"
+		}
+
+		reasonStr := ""
+		if item.Reason != "" {
+			reasonStr = fmt.Sprintf(" (%s)", item.Reason)
+		}
+
+		fmt.Printf("  %s %-40s %-20s %s\n", symbol, item.Path, actionName, reasonStr)
+	}
+	fmt.Println("------------------------")
 }
 
 type mpbTask struct {

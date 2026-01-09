@@ -9,11 +9,10 @@ import (
 	"log"
 	"mime"
 	"path/filepath"
+	"time"
 
 	"tg-blobsync/internal/domain"
 	"tg-blobsync/internal/pkg/retry"
-
-	"time"
 
 	"github.com/gotd/td/crypto"
 	"github.com/gotd/td/telegram/downloader"
@@ -22,87 +21,6 @@ import (
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 )
-
-// ListGroups returns a list of Supergroups.
-func (t *TelegramClient) ListGroups(ctx context.Context) ([]domain.Group, error) {
-	dialogs, err := t.api.MessagesGetDialogs(ctx, &tg.MessagesGetDialogsRequest{
-		Limit:      100,
-		OffsetPeer: &tg.InputPeerEmpty{},
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var groups []domain.Group
-	var chats []tg.ChatClass
-
-	switch d := dialogs.(type) {
-	case *tg.MessagesDialogs:
-		chats = d.Chats
-	case *tg.MessagesDialogsSlice:
-		chats = d.Chats
-	}
-
-	for _, chat := range chats {
-		switch c := chat.(type) {
-		case *tg.Channel:
-			if c.Megagroup {
-				t.setAccessHash(c.ID, c.AccessHash)
-				groups = append(groups, domain.Group{
-					ID:    c.ID,
-					Title: c.Title,
-				})
-			}
-		}
-	}
-
-	return groups, nil
-}
-
-// ResolveGroup ensures the AccessHash for the given groupID is cached.
-func (t *TelegramClient) ResolveGroup(ctx context.Context, groupID int64) error {
-	if _, ok := t.getAccessHash(groupID); ok {
-		return nil
-	}
-	_, err := t.ListGroups(ctx)
-	if err != nil {
-		return err
-	}
-	if _, ok := t.getAccessHash(groupID); ok {
-		return nil
-	}
-	return fmt.Errorf("group %d not found in recent dialogs", groupID)
-}
-
-// ListTopics returns a list of Forum Topics in a Supergroup.
-func (t *TelegramClient) ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error) {
-	accessHash, _ := t.getAccessHash(groupID)
-	inputPeer := &tg.InputPeerChannel{
-		ChannelID:  groupID,
-		AccessHash: accessHash,
-	}
-
-	res, err := t.api.MessagesGetForumTopics(ctx, &tg.MessagesGetForumTopicsRequest{
-		Peer:  inputPeer,
-		Limit: 100,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var topics []domain.Topic
-	for _, topic := range res.Topics {
-		switch t := topic.(type) {
-		case *tg.ForumTopic:
-			topics = append(topics, domain.Topic{
-				ID:    int64(t.ID),
-				Title: t.Title,
-			})
-		}
-	}
-
-	return topics, nil
-}
 
 // ListFiles returns files from the topic.
 func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error) {
@@ -141,50 +59,9 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 		}
 
 		for _, msg := range messages {
-			m, ok := msg.(*tg.Message)
-			if !ok {
-				continue
-			}
-
-			// Topic Filter Logic
-			topicMatch := false
-			if topicID == 0 {
-				topicMatch = true
-			} else {
-				if m.ReplyTo != nil {
-					if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
-						if h.ReplyToTopID == int(topicID) || h.ReplyToMsgID == int(topicID) {
-							topicMatch = true
-						}
-					}
-				}
-			}
-
-			if !topicMatch {
-				continue
-			}
-
-			// Parse Caption and Document Info
-			if m.Message != "" {
-				var meta domain.FileMeta
-				// Ignore unmarshal errors, it means it's not a file created by us
-				if err := json.Unmarshal([]byte(m.Message), &meta); err == nil {
-					if meta.Path != "" && (meta.Checksum != "" || meta.ModTime != 0) {
-						size := int64(0)
-						if m.Media != nil {
-							if doc, ok := m.Media.(*tg.MessageMediaDocument); ok {
-								if d, ok := doc.Document.(*tg.Document); ok {
-									size = d.Size
-								}
-							}
-						}
-						files = append(files, domain.RemoteFile{
-							Meta:      meta,
-							MessageID: m.ID,
-							Size:      size,
-						})
-					}
-				}
+			file, ok := t.parseMessageToFile(msg, topicID)
+			if ok {
+				files = append(files, file)
 			}
 		}
 
@@ -196,6 +73,52 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 	}
 
 	return files, nil
+}
+
+func (t *TelegramClient) parseMessageToFile(msg tg.MessageClass, topicID int64) (domain.RemoteFile, bool) {
+	m, ok := msg.(*tg.Message)
+	if !ok {
+		return domain.RemoteFile{}, false
+	}
+
+	// Topic Filter Logic
+	if topicID != 0 {
+		match := false
+		if m.ReplyTo != nil {
+			if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
+				if h.ReplyToTopID == int(topicID) || h.ReplyToMsgID == int(topicID) {
+					match = true
+				}
+			}
+		}
+		if !match {
+			return domain.RemoteFile{}, false
+		}
+	}
+
+	// Parse Caption and Document Info
+	if m.Message != "" {
+		var meta domain.FileMeta
+		// Ignore unmarshal errors, it means it's not a file created by us
+		if err := json.Unmarshal([]byte(m.Message), &meta); err == nil {
+			if meta.Path != "" && (meta.Checksum != "" || meta.ModTime != 0) {
+				size := int64(0)
+				if m.Media != nil {
+					if doc, ok := m.Media.(*tg.MessageMediaDocument); ok {
+						if d, ok := doc.Document.(*tg.Document); ok {
+							size = d.Size
+						}
+					}
+				}
+				return domain.RemoteFile{
+					Meta:      meta,
+					MessageID: m.ID,
+					Size:      size,
+				}, true
+			}
+		}
+	}
+	return domain.RemoteFile{}, false
 }
 
 // UploadFile uploads a file to the topic with progress reporting.
@@ -216,12 +139,12 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 
 		t.mu.Lock()
 		t.progressStarts[uploadID] = time.Now()
-		if t.progressReporter != nil {
+		if t.progressTracker != nil {
 			// If we already had a task from a previous attempt, abort it before starting a new one
 			if task != nil {
 				task.Abort()
 			}
-			task = t.progressReporter.Start(file.Path, file.Size)
+			task = t.progressTracker.Start(file.Path, file.Size)
 			t.progressTasks[uploadID] = task
 		}
 		t.mu.Unlock()
@@ -328,7 +251,7 @@ func (t *TelegramClient) Chunk(ctx context.Context, state uploader.ProgressState
 		}
 
 		// Log only if no interactive reporter is active
-		if t.progressReporter == nil {
+		if t.progressTracker == nil {
 			if state.Uploaded == state.Total || state.Uploaded%(5*1024*1024) < int64(state.PartSize) {
 				log.Printf("  [%s] %.1f%% (%s/%s)%s", state.Name, percent, formatSize(state.Uploaded), formatSize(state.Total), speedStr)
 			}
@@ -430,8 +353,8 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	pr, pw := io.Pipe()
 
 	var task domain.ProgressTask
-	if t.progressReporter != nil {
-		task = t.progressReporter.Start(fileName, size)
+	if t.progressTracker != nil {
+		task = t.progressTracker.Start(fileName, size)
 	}
 
 	var downloadSuccess bool
@@ -505,7 +428,7 @@ func (tw *trackingWriter) Write(p []byte) (n int, err error) {
 }
 
 func (tw *trackingWriter) report() {
-	if tw.total <= 0 || tw.t.progressReporter != nil {
+	if tw.total <= 0 || tw.t.progressTracker != nil {
 		return
 	}
 

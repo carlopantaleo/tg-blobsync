@@ -5,12 +5,22 @@ import (
 	"io"
 )
 
-// ProgressReporter defines the interface for reporting progress of file transfers.
-type ProgressReporter interface {
+// ProgressTracker defines the interface for tracking file transfer progress.
+type ProgressTracker interface {
 	SetTotalFiles(total int)
 	Start(name string, total int64) ProgressTask
 	Wait()
-	ConfirmSync(toUpload, toUpdate, toDelete []string) (bool, error)
+}
+
+// SyncConfirmer defines the interface for confirming synchronization plans.
+type SyncConfirmer interface {
+	ConfirmSync(plan SyncPlan) (bool, error)
+}
+
+// UserInterface combines progress tracking and confirmation.
+type UserInterface interface {
+	ProgressTracker
+	SyncConfirmer
 }
 
 type ProgressTask interface {
@@ -34,7 +44,7 @@ type BlobStorage interface {
 
 	// Lifecycle
 	Close() error
-	SetProgressReporter(reporter ProgressReporter)
+	SetProgressTracker(tracker ProgressTracker)
 }
 
 // FileSystem defines the interface for interacting with the local filesystem.

@@ -32,8 +32,8 @@ type TelegramClient struct {
 	progressTasks  map[int64]domain.ProgressTask
 	mu             sync.RWMutex
 
-	progressReporter domain.ProgressReporter
-	uploadThreads    int
+	progressTracker domain.ProgressTracker
+	uploadThreads   int
 }
 
 // AuthInput defines an interface for interactive authentication input.
@@ -151,10 +151,10 @@ func (t *TelegramClient) Close() error {
 	return nil
 }
 
-func (t *TelegramClient) SetProgressReporter(reporter domain.ProgressReporter) {
+func (t *TelegramClient) SetProgressTracker(tracker domain.ProgressTracker) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.progressReporter = reporter
+	t.progressTracker = tracker
 }
 
 func (t *TelegramClient) getAccessHash(id int64) (int64, bool) {

@@ -2,413 +2,101 @@ package usecase
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log"
-	"path/filepath"
-	"strings"
 	"tg-blobsync/internal/domain"
-	"tg-blobsync/internal/pkg/retry"
-	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 type Synchronizer struct {
-	fs       domain.FileSystem
-	storage  domain.BlobStorage
-	workers  int
-	reporter domain.ProgressReporter
-	skipMD5  bool
-	subDir   string
+	fs      domain.FileSystem
+	storage domain.BlobStorage
+	workers int
+	ui      domain.UserInterface
+	skipMD5 bool
+	subDir  string
 }
 
-func NewSynchronizer(fs domain.FileSystem, storage domain.BlobStorage, workers int, reporter domain.ProgressReporter, skipMD5 bool) *Synchronizer {
-	if workers <= 0 {
-		workers = 1
-	}
+func NewSynchronizer(
+	fs domain.FileSystem,
+	storage domain.BlobStorage,
+	workers int,
+	ui domain.UserInterface,
+	skipMD5 bool,
+) *Synchronizer {
 	return &Synchronizer{
-		fs:       fs,
-		storage:  storage,
-		workers:  workers,
-		reporter: reporter,
-		skipMD5:  skipMD5,
+		fs:      fs,
+		storage: storage,
+		workers: workers,
+		ui:      ui,
+		skipMD5: skipMD5,
 	}
 }
 
 func (s *Synchronizer) SetSubDir(subDir string) {
-	// Ensure subDir uses forward slashes and has no leading/trailing slashes for consistent matching
-	subDir = filepath.ToSlash(subDir)
-	subDir = strings.Trim(subDir, "/")
 	s.subDir = subDir
 }
 
-// Push synchronizes local folder to remote topic.
 func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicID int64) error {
 	log.Println("Starting Push synchronization...")
 
-	// 1. Analyze Local
-	localFiles, err := s.fs.ListFiles(rootDir, s.skipMD5)
+	// 1. Scan
+	scanner := NewScanner(s.fs, s.storage, s.subDir, s.skipMD5)
+
+	localFiles, err := scanner.ScanLocal(rootDir)
 	if err != nil {
-		return fmt.Errorf("failed to list local files: %w", err)
-	}
-	localMap := make(map[string]domain.LocalFile)
-	for _, f := range localFiles {
-		if s.subDir != "" {
-			// Only include files that are within the subDir
-			if !strings.HasPrefix(filepath.ToSlash(f.Path), s.subDir+"/") && filepath.ToSlash(f.Path) != s.subDir {
-				continue
-			}
-		}
-		localMap[f.Path] = f
-	}
-
-	// 2. Fetch Remote
-	remoteFiles, err := s.storage.ListFiles(ctx, groupID, topicID)
-	if err != nil {
-		return fmt.Errorf("failed to list remote files: %w", err)
-	}
-	remoteMap := make(map[string]domain.RemoteFile)
-	for _, f := range remoteFiles {
-		if s.subDir != "" {
-			// Only include files that are within the subDir
-			relPath := filepath.ToSlash(f.Meta.Path)
-			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
-				continue
-			}
-		}
-		// Telegram returns messages newest-first.
-		// Keep only the first (newest) version of each file.
-		if _, exists := remoteMap[f.Meta.Path]; !exists {
-			remoteMap[f.Meta.Path] = f
-		}
-	}
-
-	// 3. Plan Operations
-	var toUpload, toUpdate []string
-	for path, localFile := range localMap {
-		remoteFile, exists := remoteMap[path]
-		if !exists {
-			toUpload = append(toUpload, path)
-		} else {
-			shouldUpdate := false
-			if s.skipMD5 {
-				// Use ModTime and Size as comparison
-				remoteSize := remoteFile.Size
-				if remoteFile.Meta.Flags == "EMPTY_FILE" {
-					remoteSize = 0
-				}
-				if remoteFile.Meta.ModTime != localFile.ModTime || remoteSize != localFile.Size {
-					shouldUpdate = true
-				}
-			} else {
-				// Use Checksum
-				if remoteFile.Meta.Checksum != localFile.Checksum {
-					shouldUpdate = true
-				}
-			}
-
-			if shouldUpdate {
-				toUpdate = append(toUpdate, path)
-			}
-		}
-	}
-
-	var toDelete []string
-	for path := range remoteMap {
-		if _, exists := localMap[path]; !exists {
-			toDelete = append(toDelete, path)
-		}
-	}
-
-	log.Printf("----------------------------------------------------------")
-	log.Printf("Sync Summary (Push):")
-	log.Printf("  Local files:  %d", len(localMap))
-	log.Printf("  Remote files: %d", len(remoteMap))
-	log.Printf("  To Upload:    %d", len(toUpload))
-	log.Printf("  To Update:    %d", len(toUpdate))
-	log.Printf("  To Delete:    %d", len(toDelete))
-	log.Printf("----------------------------------------------------------")
-
-	if len(toUpload)+len(toUpdate)+len(toDelete) == 0 {
-		log.Println("Everything is up to date.")
-		return nil
-	}
-
-	if s.reporter != nil {
-		confirmed, err := s.reporter.ConfirmSync(toUpload, toUpdate, toDelete)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			log.Println("Sync cancelled by user.")
-			return nil
-		}
-	}
-
-	// 4. Upload & Update (Upsert)
-	// Combine upload and update tasks
-	allTasks := append(toUpload, toUpdate...)
-
-	if s.reporter != nil {
-		s.reporter.SetTotalFiles(len(allTasks))
-	}
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(s.workers)
-
-	// Use a map to track old remote files that need to be deleted after update
-	updateMap := make(map[string]domain.RemoteFile)
-	for _, path := range toUpdate {
-		updateMap[path] = remoteMap[path]
-	}
-
-	for _, path := range allTasks {
-		// Check if context is already canceled to stop scheduling new tasks
-		if gCtx.Err() != nil {
-			break
-		}
-
-		path := path
-		localFile := localMap[path]
-
-		g.Go(func() error {
-			err := s.storage.UploadFile(gCtx, groupID, topicID, localFile)
-			if err != nil {
-				return fmt.Errorf("error uploading file %s: %w", path, err)
-			}
-
-			// If it was an update, delete the old version
-			if oldFile, ok := updateMap[path]; ok {
-				log.Printf("[*] Deleting old version of: %s", path)
-				err := s.storage.DeleteFile(gCtx, groupID, topicID, oldFile.MessageID)
-				if err != nil {
-					log.Printf("Warning: failed to delete old version of %s: %v", path, err)
-				}
-			}
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
 		return err
 	}
 
-	if s.reporter != nil {
-		s.reporter.Wait()
+	remoteFiles, err := scanner.ScanRemote(ctx, groupID, topicID)
+	if err != nil {
+		return err
 	}
 
-	// 5. Pruning (Delete from remote if not in local)
-	for _, path := range toDelete {
-		remoteFile := remoteMap[path]
-		log.Printf("[-] Deleting remote file: %s", path)
-		err := s.storage.DeleteFile(ctx, groupID, topicID, remoteFile.MessageID)
-		if err != nil {
-			log.Printf("Error deleting remote file %s: %v", path, err)
-		}
-	}
+	// 2. Diff
+	differ := NewDiffer(s.skipMD5)
+	plan := differ.DiffPush(localFiles, remoteFiles)
 
-	log.Println("Push synchronization completed.")
-	return nil
+	log.Printf("Sync Summary (Push):")
+	log.Printf("  Local files:  %d", len(localFiles))
+	log.Printf("  Remote files: %d", len(remoteFiles))
+	log.Printf("  To Upload:    %d", plan.Summary.ToUpload)
+	log.Printf("  To Update:    %d", plan.Summary.ToUpdate)
+	log.Printf("  To Delete:    %d", plan.Summary.ToDelete)
+
+	// 3. Execute
+	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
+	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
 }
 
-// Pull synchronizes remote topic to local folder.
 func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicID int64) error {
 	log.Println("Starting Pull synchronization...")
 
-	// 1. Fetch Remote
-	remoteFiles, err := s.storage.ListFiles(ctx, groupID, topicID)
+	// 1. Scan
+	scanner := NewScanner(s.fs, s.storage, s.subDir, s.skipMD5)
+
+	// Note: ScanRemote is called first in original Pull, but order doesn't strictly matter
+	// unless we want to fail fast on network.
+	remoteFiles, err := scanner.ScanRemote(ctx, groupID, topicID)
 	if err != nil {
-		return fmt.Errorf("failed to list remote files: %w", err)
-	}
-	remoteMap := make(map[string]domain.RemoteFile)
-	for _, f := range remoteFiles {
-		if s.subDir != "" {
-			// Only include files that are within the subDir
-			relPath := filepath.ToSlash(f.Meta.Path)
-			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
-				continue
-			}
-		}
-		// Telegram returns messages newest-first.
-		// Keep only the first (newest) version of each file.
-		if _, exists := remoteMap[f.Meta.Path]; !exists {
-			remoteMap[f.Meta.Path] = f
-		}
-	}
-
-	// 2. Analyze Local
-	// We need to know what's local to prune or skip
-	localFiles, err := s.fs.ListFiles(rootDir, s.skipMD5)
-	if err != nil {
-		// If directory doesn't exist, we might treat it as empty or create it.
-		// For now assume ListFiles handles it or returns error.
-		// If it's a "not found" error, maybe we just have 0 local files.
-		// But usually ListFiles(rootDir) expects rootDir to exist.
-		// Let's assume the caller ensures rootDir exists or we create it.
-		// Actually, ListFiles calls filepath.WalkDir. If root doesn't exist it errors.
-		// Let's ensure it exists.
-		if err := s.fs.EnsureDir(rootDir); err != nil {
-			return fmt.Errorf("failed to ensure root dir: %w", err)
-		}
-		// Try listing again
-		localFiles, err = s.fs.ListFiles(rootDir, s.skipMD5)
-		if err != nil {
-			return fmt.Errorf("failed to list local files: %w", err)
-		}
-	}
-	localMap := make(map[string]domain.LocalFile)
-	for _, f := range localFiles {
-		if s.subDir != "" {
-			// Only include files that are within the subDir
-			relPath := filepath.ToSlash(f.Path)
-			if !strings.HasPrefix(relPath, s.subDir+"/") && relPath != s.subDir {
-				continue
-			}
-		}
-		localMap[f.Path] = f
-	}
-
-	// 3. Plan Operations
-	var toDownload, toUpdate []string
-	for path, remoteFile := range remoteMap {
-		localFile, exists := localMap[path]
-		if !exists {
-			toDownload = append(toDownload, path)
-		} else {
-			shouldUpdate := false
-			if s.skipMD5 {
-				remoteSize := remoteFile.Size
-				if remoteFile.Meta.Flags == "EMPTY_FILE" {
-					remoteSize = 0
-				}
-				if localFile.ModTime != remoteFile.Meta.ModTime || localFile.Size != remoteSize {
-					shouldUpdate = true
-				}
-			} else {
-				if localFile.Checksum != remoteFile.Meta.Checksum {
-					shouldUpdate = true
-				}
-			}
-
-			if shouldUpdate {
-				toUpdate = append(toUpdate, path)
-			}
-		}
-	}
-
-	var toDelete []string
-	for path := range localMap {
-		if _, exists := remoteMap[path]; !exists {
-			toDelete = append(toDelete, path)
-		}
-	}
-
-	log.Printf("----------------------------------------------------------")
-	log.Printf("Sync Summary (Pull):")
-	log.Printf("  Local files:  %d", len(localMap))
-	log.Printf("  Remote files: %d", len(remoteMap))
-	log.Printf("  To Download:  %d", len(toDownload))
-	log.Printf("  To Update:    %d", len(toUpdate))
-	log.Printf("  To Delete:    %d", len(toDelete))
-	log.Printf("----------------------------------------------------------")
-
-	if len(toDownload)+len(toUpdate)+len(toDelete) == 0 {
-		log.Println("Everything is up to date.")
-		return nil
-	}
-
-	if s.reporter != nil {
-		confirmed, err := s.reporter.ConfirmSync(toDownload, toUpdate, toDelete)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			log.Println("Sync cancelled by user.")
-			return nil
-		}
-	}
-
-	// 4. Download
-	allTasks := append(toDownload, toUpdate...)
-
-	if s.reporter != nil {
-		s.reporter.SetTotalFiles(len(allTasks))
-	}
-	dg, dgCtx := errgroup.WithContext(ctx)
-	dg.SetLimit(s.workers)
-
-	for _, path := range allTasks {
-		// Check if context is already canceled to stop scheduling new tasks
-		if dgCtx.Err() != nil {
-			break
-		}
-
-		path := path
-		remoteFile := remoteMap[path]
-
-		dg.Go(func() error {
-			fullPath := filepath.Join(rootDir, path)
-
-			operation := func() error {
-				if remoteFile.Meta.Flags == "EMPTY_FILE" {
-					log.Printf("[*] Restoring empty file: %s", path)
-					if err := s.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
-						return fmt.Errorf("error creating empty file %s: %w", path, err)
-					}
-					if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
-						log.Printf("Warning: failed to set modification time for %s: %v", path, err)
-					}
-					return nil
-				}
-
-				rc, err := s.storage.DownloadFile(dgCtx, groupID, topicID, remoteFile.MessageID, remoteFile.Meta.Path, remoteFile.Size)
-				if err != nil {
-					return fmt.Errorf("error downloading file %s: %w", path, err)
-				}
-				defer rc.Close()
-
-				if err := s.fs.WriteFile(fullPath, rc); err != nil {
-					return fmt.Errorf("error writing file %s: %w", path, err)
-				}
-
-				// Restore original modification time
-				if remoteFile.Meta.ModTime > 0 {
-					if err := s.fs.SetModTime(fullPath, remoteFile.Meta.ModTime); err != nil {
-						log.Printf("[!] Warning: failed to set modification time for %s: %v", path, err)
-					}
-				}
-				return nil
-			}
-
-			// Retry logic for download and write using centralized utility
-			return retry.WithRetry(dgCtx, "Pull: "+path, operation, 5, 1*time.Second)
-		})
-	}
-
-	if err := dg.Wait(); err != nil {
 		return err
 	}
 
-	if s.reporter != nil {
-		s.reporter.Wait()
+	localFiles, err := scanner.ScanLocal(rootDir)
+	if err != nil {
+		return err
 	}
 
-	// 5. Pruning (Delete local if not in remote)
-	for _, path := range toDelete {
-		log.Printf("[-] Deleting local file: %s", path)
-		fullPath := filepath.Join(rootDir, path)
-		err := s.fs.DeleteFile(fullPath)
-		if err != nil {
-			log.Printf("Error deleting local file %s: %v", path, err)
-		}
-	}
+	// 2. Diff
+	differ := NewDiffer(s.skipMD5)
+	plan := differ.DiffPull(localFiles, remoteFiles)
 
-	log.Println("Pull synchronization completed.")
-	return nil
-}
+	log.Printf("Sync Summary (Pull):")
+	log.Printf("  Local files:  %d", len(localFiles))
+	log.Printf("  Remote files: %d", len(remoteFiles))
+	log.Printf("  To Download:  %d", plan.Summary.ToDownload)
+	log.Printf("  To Update:    %d", plan.Summary.ToUpdate)
+	log.Printf("  To Delete:    %d", plan.Summary.ToDelete)
 
-// MetaToJSON helper
-func MetaToJSON(meta domain.FileMeta) (string, error) {
-	b, err := json.Marshal(meta)
-	return string(b), err
+	// 3. Execute
+	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
+	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
 }

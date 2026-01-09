@@ -2,16 +2,14 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
-	"strconv"
+
 	"tg-blobsync/internal/adapter/filesystem"
 	"tg-blobsync/internal/adapter/telegram"
 	"tg-blobsync/internal/adapter/ui"
 	"tg-blobsync/internal/config"
-	"tg-blobsync/internal/domain"
 	"tg-blobsync/internal/usecase"
 )
 
@@ -22,187 +20,110 @@ var (
 	AppHash string
 )
 
-type Config struct {
-	Command        string
-	AppID          int
-	AppHash        string
-	SessionPath    string
-	GroupID        int64
-	TopicID        int64
-	DirPath        string
-	SubDir         string
-	Workers        int
-	UploadThreads  int
-	SkipMD5        bool
-	NonInteractive bool
-}
-
 func main() {
-	config, err := parseConfig()
-	if err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
 
-	// Initialize Dependencies
+func run() error {
+	cfg, err := config.ParseCLI(AppID, AppHash)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	console := ui.NewConsoleUI(config.NonInteractive)
+	console := ui.NewConsoleUI(cfg.NonInteractive)
 
-	log.Printf("Session file: %s", config.SessionPath)
+	log.Printf("Session file: %s", cfg.SessionPath)
 
-	tgClient, err := telegram.NewTelegramClient(config.AppID, config.AppHash, config.SessionPath, console)
+	tgClient, err := telegram.NewTelegramClient(cfg.AppID, cfg.AppHash, cfg.SessionPath, console)
 	if err != nil {
-		log.Fatalf("Failed to create telegram client: %v", err)
+		return fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
-	// Start Client (Connects & Auths)
 	log.Println("Connecting to Telegram...")
 	if err := tgClient.Start(ctx, console); err != nil {
-		log.Fatalf("Failed to start telegram client: %v", err)
+		return fmt.Errorf("failed to start telegram client: %w", err)
 	}
 	defer tgClient.Close()
 
 	log.Println("Connected!")
 
-	tgClient.SetUploadThreads(config.UploadThreads)
+	tgClient.SetUploadThreads(cfg.UploadThreads)
+	tgClient.SetProgressTracker(console)
 
-	// Interactive Selection if needed
-	if config.GroupID == 0 {
+	if err := ensureSelection(ctx, cfg, tgClient, console); err != nil {
+		return err
+	}
+
+	switch cfg.Command {
+	case "push":
+		return runSync(ctx, cfg, tgClient, console, true)
+	case "pull":
+		return runSync(ctx, cfg, tgClient, console, false)
+	case "list":
+		return runList(ctx, cfg, tgClient, console)
+	default:
+		return fmt.Errorf("unknown command: %s", cfg.Command)
+	}
+}
+
+func ensureSelection(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) error {
+	selector := usecase.NewSelector(storage)
+
+	if cfg.GroupID == 0 {
 		log.Println("Fetching groups...")
-		groups, err := tgClient.ListGroups(ctx)
+		groups, err := selector.ListGroups(ctx)
 		if err != nil {
-			log.Fatalf("Failed to list groups: %v", err)
+			return fmt.Errorf("failed to list groups: %w", err)
 		}
 
 		selectedGroup, err := console.SelectGroup(groups)
 		if err != nil {
-			log.Fatalf("Group selection failed: %v", err)
+			return fmt.Errorf("group selection failed: %w", err)
 		}
-		config.GroupID = selectedGroup.ID
-		log.Printf("Selected Group: %s (%d)", selectedGroup.Title, config.GroupID)
+		cfg.GroupID = selectedGroup.ID
+		log.Printf("Selected Group: %s (%d)", selectedGroup.Title, cfg.GroupID)
 	} else {
-		// Ensure we have the AccessHash for the provided ID
-		log.Printf("Resolving group %d...", config.GroupID)
-		if err := tgClient.ResolveGroup(ctx, config.GroupID); err != nil {
-			log.Fatalf("Failed to resolve group: %v", err)
+		log.Printf("Resolving group %d...", cfg.GroupID)
+		if err := storage.ResolveGroup(ctx, cfg.GroupID); err != nil {
+			return fmt.Errorf("failed to resolve group: %w", err)
 		}
 	}
 
-	if config.TopicID == 0 {
+	if cfg.TopicID == 0 {
 		log.Println("Fetching topics...")
-		topics, err := tgClient.ListTopics(ctx, config.GroupID)
+		topics, err := selector.ListTopics(ctx, cfg.GroupID)
 		if err != nil {
-			log.Fatalf("Failed to list topics: %v", err)
+			return fmt.Errorf("failed to list topics: %w", err)
 		}
 
 		selectedTopic, err := console.SelectTopic(topics)
 		if err != nil {
-			log.Fatalf("Topic selection failed: %v", err)
+			return fmt.Errorf("topic selection failed: %w", err)
 		}
-		config.TopicID = selectedTopic.ID
-		log.Printf("Selected Topic: %s (%d)", selectedTopic.Title, config.TopicID)
+		cfg.TopicID = selectedTopic.ID
+		log.Printf("Selected Topic: %s (%d)", selectedTopic.Title, cfg.TopicID)
 	}
-
-	tgClient.SetProgressReporter(console)
-
-	var opErr error
-	// Execute Command
-	switch config.Command {
-	case "push":
-		localFS := filesystem.NewLocalFileSystem()
-		syncer := usecase.NewSynchronizer(localFS, tgClient, config.Workers, console, config.SkipMD5)
-		syncer.SetSubDir(config.SubDir)
-		opErr = syncer.Push(ctx, config.DirPath, config.GroupID, config.TopicID)
-	case "pull":
-		localFS := filesystem.NewLocalFileSystem()
-		syncer := usecase.NewSynchronizer(localFS, tgClient, config.Workers, console, config.SkipMD5)
-		syncer.SetSubDir(config.SubDir)
-		opErr = syncer.Pull(ctx, config.DirPath, config.GroupID, config.TopicID)
-	case "list":
-		opErr = runList(ctx, tgClient, console, config)
-	}
-
-	if opErr != nil {
-		log.Fatalf("Operation failed: %v", opErr)
-	}
-
-	log.Println("Done.")
+	return nil
 }
 
-func parseConfig() (*Config, error) {
-	if len(os.Args) < 2 {
-		return nil, fmt.Errorf("usage: tgblobsync <command> [flags]\nCommands: push, pull, list")
+func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, push bool) error {
+	localFS := filesystem.NewLocalFileSystem()
+	syncer := usecase.NewSynchronizer(localFS, storage, cfg.Workers, ui, cfg.SkipMD5)
+	syncer.SetSubDir(cfg.SubDir)
+
+	if push {
+		return syncer.Push(ctx, cfg.DirPath, cfg.GroupID, cfg.TopicID)
 	}
-
-	cmd := os.Args[1]
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-
-	cfg := &Config{Command: cmd}
-
-	fs.Int64Var(&cfg.GroupID, "group-id", 0, "ID of the Supergroup")
-	fs.Int64Var(&cfg.TopicID, "topic-id", 0, "ID of the Topic")
-	fs.StringVar(&cfg.DirPath, "dir", "", "Path to the directory to sync (required for push/pull)")
-	fs.StringVar(&cfg.SubDir, "sub-dir", "", "Synchronize only a specific subdirectory within the topic")
-	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
-	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
-	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
-	fs.BoolVar(&cfg.NonInteractive, "non-interactive", false, "Disable interactive UI and progress bars")
-
-	fs.Parse(os.Args[2:])
-
-	// Validate App Credentials
-	appIDStr := os.Getenv("APP_ID")
-	if AppID != "" {
-		appIDStr = AppID
-	}
-	appHashStr := os.Getenv("APP_HASH")
-	if AppHash != "" {
-		appHashStr = AppHash
-	}
-
-	if appIDStr == "" || appHashStr == "" {
-		return nil, fmt.Errorf("AppID and AppHash must be provided via ldflags or env vars (APP_ID/APP_HASH)")
-	}
-
-	var err error
-	cfg.AppID, err = strconv.Atoi(appIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid AppID: %v", err)
-	}
-	cfg.AppHash = appHashStr
-
-	cfg.SessionPath, err = config.GetSessionPath()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get session path: %v", err)
-	}
-
-	// Command specific validation
-	if (cmd == "push" || cmd == "pull") && cfg.DirPath == "" {
-		return nil, fmt.Errorf("--dir is required for push/pull commands")
-	}
-
-	if cfg.NonInteractive {
-		if cfg.GroupID == 0 || cfg.TopicID == 0 {
-			return nil, fmt.Errorf("--group-id and --topic-id are required in non-interactive mode")
-		}
-	}
-
-	return cfg, nil
+	return syncer.Pull(ctx, cfg.DirPath, cfg.GroupID, cfg.TopicID)
 }
 
-func runList(ctx context.Context, storage domain.BlobStorage, ui *ui.ConsoleUI, cfg *Config) error {
-	log.Println("Fetching remote files...")
-	files, err := storage.ListFiles(ctx, cfg.GroupID, cfg.TopicID)
-	if err != nil {
-		return err
-	}
-
-	if len(files) == 0 {
-		fmt.Println("No files found in this topic.")
-		return nil
-	}
-
-	return ui.BrowseFiles(files)
+func runList(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI) error {
+	browser := usecase.NewBrowser(storage, ui)
+	return browser.ListAndBrowse(ctx, cfg.GroupID, cfg.TopicID)
 }
