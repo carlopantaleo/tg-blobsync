@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"tg-blobsync/internal/domain"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 type ConsoleUI struct {
 	progress       *mpb.Progress
 	nonInteractive bool
+	totalFiles     int
+	startedFiles   int
+	completedFiles int
+	mu             sync.Mutex
 }
 
 func NewConsoleUI(nonInteractive bool) *ConsoleUI {
@@ -32,20 +37,44 @@ func NewConsoleUI(nonInteractive bool) *ConsoleUI {
 	}
 }
 
+func (u *ConsoleUI) SetTotalFiles(total int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.totalFiles = total
+	u.startedFiles = 0
+	u.completedFiles = 0
+}
+
 // Progress Reporter Implementation
 
 func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
+	u.mu.Lock()
+	u.startedFiles++
+	currentFileNum := u.startedFiles
+	totalFiles := u.totalFiles
+	u.mu.Unlock()
+
+	displayName := name
+	if totalFiles > 0 {
+		displayName = fmt.Sprintf("[%d/%d] %s", currentFileNum, totalFiles, name)
+	}
+
 	if u.nonInteractive {
 		return &nonInteractiveTask{
-			name:      name,
+			name:      displayName,
 			total:     total,
 			startTime: time.Now(),
+			onComplete: func() {
+				u.mu.Lock()
+				u.completedFiles++
+				u.mu.Unlock()
+			},
 		}
 	}
 
 	bar := u.progress.AddBar(total,
 		mpb.PrependDecorators(
-			decor.Name(name, decor.WC{W: len(name) + 1}),
+			decor.Name(displayName, decor.WC{W: len(displayName) + 1}),
 			decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
 		),
 		mpb.AppendDecorators(
@@ -55,7 +84,14 @@ func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
 			decor.AverageSpeed(decor.SizeB1024(0), "% .2f", decor.WCSyncSpace),
 		),
 	)
-	return &mpbTask{bar: bar}
+	return &mpbTask{
+		bar: bar,
+		onComplete: func() {
+			u.mu.Lock()
+			u.completedFiles++
+			u.mu.Unlock()
+		},
+	}
 }
 
 func (u *ConsoleUI) Wait() {
@@ -68,7 +104,8 @@ func (u *ConsoleUI) Wait() {
 }
 
 type mpbTask struct {
-	bar *mpb.Bar
+	bar        *mpb.Bar
+	onComplete func()
 }
 
 func (t *mpbTask) Increment(n int) {
@@ -81,6 +118,9 @@ func (t *mpbTask) SetCurrent(current int64) {
 
 func (t *mpbTask) Complete() {
 	t.bar.SetTotal(-1, true)
+	if t.onComplete != nil {
+		t.onComplete()
+	}
 }
 
 func (t *mpbTask) Abort() {
@@ -88,10 +128,11 @@ func (t *mpbTask) Abort() {
 }
 
 type nonInteractiveTask struct {
-	name      string
-	total     int64
-	current   int64
-	startTime time.Time
+	name       string
+	total      int64
+	current    int64
+	startTime  time.Time
+	onComplete func()
 }
 
 func (t *nonInteractiveTask) Increment(n int) {
@@ -110,6 +151,9 @@ func (t *nonInteractiveTask) Complete() {
 		formatSize(t.current),
 		formatSize(int64(speed)),
 	)
+	if t.onComplete != nil {
+		t.onComplete()
+	}
 }
 
 func (t *nonInteractiveTask) Abort() {

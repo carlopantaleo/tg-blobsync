@@ -7,6 +7,7 @@ import (
 
 // ProgressReporter defines the interface for reporting progress of file transfers.
 type ProgressReporter interface {
+	SetTotalFiles(total int)
 	Start(name string, total int64) ProgressTask
 	Wait()
 }

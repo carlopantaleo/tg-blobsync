@@ -136,11 +136,14 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 
 	// 4. Upload & Update (Upsert)
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(s.workers)
-
 	// Combine upload and update tasks
 	allTasks := append(toUpload, toUpdate...)
+
+	if s.reporter != nil {
+		s.reporter.SetTotalFiles(len(allTasks))
+	}
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(s.workers)
 
 	// Use a map to track old remote files that need to be deleted after update
 	updateMap := make(map[string]domain.RemoteFile)
@@ -304,10 +307,13 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	}
 
 	// 4. Download
+	allTasks := append(toDownload, toUpdate...)
+
+	if s.reporter != nil {
+		s.reporter.SetTotalFiles(len(allTasks))
+	}
 	dg, dgCtx := errgroup.WithContext(ctx)
 	dg.SetLimit(s.workers)
-
-	allTasks := append(toDownload, toUpdate...)
 
 	for _, path := range allTasks {
 		// Check if context is already canceled to stop scheduling new tasks
