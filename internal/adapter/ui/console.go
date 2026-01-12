@@ -394,81 +394,10 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 	currentDir := ""
 	for {
 		// Filter items in current directory
-		type dirInfo struct {
-			Size  int64
-			IsDir bool
+		menu, currentDirTotalSize, err := u.buildBrowserItems(files, currentDir)
+		if err != nil {
+			return err
 		}
-		items := make(map[string]*dirInfo) // name -> info
-		var filesInDir []domain.RemoteFile
-		var currentDirTotalSize int64
-
-		for _, f := range files {
-			path := filepath.ToSlash(f.Meta.Path)
-			if currentDir == "" {
-				parts := strings.Split(path, "/")
-				if len(parts) > 1 {
-					if _, ok := items[parts[0]]; !ok {
-						items[parts[0]] = &dirInfo{IsDir: true}
-					}
-					items[parts[0]].Size += f.Size
-				} else {
-					filesInDir = append(filesInDir, f)
-				}
-				currentDirTotalSize += f.Size
-			} else {
-				if strings.HasPrefix(path, currentDir+"/") {
-					relPath := strings.TrimPrefix(path, currentDir+"/")
-					parts := strings.Split(relPath, "/")
-					if len(parts) > 1 {
-						if _, ok := items[parts[0]]; !ok {
-							items[parts[0]] = &dirInfo{IsDir: true}
-						}
-						items[parts[0]].Size += f.Size
-					} else {
-						filesInDir = append(filesInDir, f)
-					}
-					currentDirTotalSize += f.Size
-				}
-			}
-		}
-
-		type menuEntry struct {
-			Label   string
-			IsDir   bool
-			DirName string
-			File    *domain.RemoteFile
-		}
-
-		var menu []menuEntry
-		if currentDir != "" {
-			menu = append(menu, menuEntry{Label: ".. [Go Up]", IsDir: true})
-		}
-
-		// Add directories
-		var sortedDirs []string
-		for d := range items {
-			sortedDirs = append(sortedDirs, d)
-		}
-		sort.Strings(sortedDirs)
-
-		for _, d := range sortedDirs {
-			info := items[d]
-			label := fmt.Sprintf("\U0001F4C1 %-30s %10s", d, formatSize(info.Size))
-			menu = append(menu, menuEntry{Label: label, IsDir: true, DirName: d})
-		}
-
-		// Add files
-		sort.Slice(filesInDir, func(i, j int) bool {
-			return filepath.Base(filesInDir[i].Meta.Path) < filepath.Base(filesInDir[j].Meta.Path)
-		})
-
-		for _, f := range filesInDir {
-			modTime := time.Unix(f.Meta.ModTime, 0).Format("2006-01-02 15:04:05")
-			label := fmt.Sprintf("\U0001F4C4 %-30s %10s  %s", filepath.Base(f.Meta.Path), formatSize(f.Size), modTime)
-			menu = append(menu, menuEntry{Label: label, IsDir: false, File: &f})
-		}
-
-		menu = append(menu, menuEntry{Label: "Exit Browser", IsDir: false})
 
 		displayDir := currentDir
 		if displayDir == "" {
@@ -520,25 +449,109 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 		}
 
 		if selected.File != nil {
-			f := selected.File
-			fmt.Printf("\n--- File Details ---\n")
-			fmt.Printf("Path:     %s\n", f.Meta.Path)
-			fmt.Printf("Size:     %s\n", formatSize(f.Size))
-			fmt.Printf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339))
-			if f.Meta.Checksum != "" {
-				fmt.Printf("Checksum: %s\n", f.Meta.Checksum)
-			}
-			if f.Meta.Flags != "" {
-				fmt.Printf("Flags:    %s\n", f.Meta.Flags)
-			}
-			fmt.Printf("MsgID:    %d\n", f.MessageID)
-			fmt.Printf("--------------------\n\n")
-
-			promptContinue := promptui.Prompt{
-				Label:     "Press Enter to continue browsing",
-				IsConfirm: false,
-			}
-			promptContinue.Run()
+			u.showFileDetails(selected.File)
 		}
 	}
+}
+
+type browserMenuEntry struct {
+	Label   string
+	IsDir   bool
+	DirName string
+	File    *domain.RemoteFile
+}
+
+func (u *ConsoleUI) buildBrowserItems(files []domain.RemoteFile, currentDir string) ([]browserMenuEntry, int64, error) {
+	type dirInfo struct {
+		Size  int64
+		IsDir bool
+	}
+	items := make(map[string]*dirInfo) // name -> info
+	var filesInDir []domain.RemoteFile
+	var currentDirTotalSize int64
+
+	for _, f := range files {
+		path := filepath.ToSlash(f.Meta.Path)
+		if currentDir == "" {
+			parts := strings.Split(path, "/")
+			if len(parts) > 1 {
+				if _, ok := items[parts[0]]; !ok {
+					items[parts[0]] = &dirInfo{IsDir: true}
+				}
+				items[parts[0]].Size += f.Size
+			} else {
+				filesInDir = append(filesInDir, f)
+			}
+			currentDirTotalSize += f.Size
+		} else {
+			if strings.HasPrefix(path, currentDir+"/") {
+				relPath := strings.TrimPrefix(path, currentDir+"/")
+				parts := strings.Split(relPath, "/")
+				if len(parts) > 1 {
+					if _, ok := items[parts[0]]; !ok {
+						items[parts[0]] = &dirInfo{IsDir: true}
+					}
+					items[parts[0]].Size += f.Size
+				} else {
+					filesInDir = append(filesInDir, f)
+				}
+				currentDirTotalSize += f.Size
+			}
+		}
+	}
+
+	var menu []browserMenuEntry
+	if currentDir != "" {
+		menu = append(menu, browserMenuEntry{Label: ".. [Go Up]", IsDir: true})
+	}
+
+	// Add directories
+	var sortedDirs []string
+	for d := range items {
+		sortedDirs = append(sortedDirs, d)
+	}
+	sort.Strings(sortedDirs)
+
+	for _, d := range sortedDirs {
+		info := items[d]
+		label := fmt.Sprintf("\U0001F4C1 %-30s %10s", d, formatSize(info.Size))
+		menu = append(menu, browserMenuEntry{Label: label, IsDir: true, DirName: d})
+	}
+
+	// Add files
+	sort.Slice(filesInDir, func(i, j int) bool {
+		return filepath.Base(filesInDir[i].Meta.Path) < filepath.Base(filesInDir[j].Meta.Path)
+	})
+
+	for _, f := range filesInDir {
+		modTime := time.Unix(f.Meta.ModTime, 0).Format("2006-01-02 15:04:05")
+		label := fmt.Sprintf("\U0001F4C4 %-30s %10s  %s", filepath.Base(f.Meta.Path), formatSize(f.Size), modTime)
+		fCopy := f // copy to avoid loop variable capture issues
+		menu = append(menu, browserMenuEntry{Label: label, IsDir: false, File: &fCopy})
+	}
+
+	menu = append(menu, browserMenuEntry{Label: "Exit Browser", IsDir: false})
+
+	return menu, currentDirTotalSize, nil
+}
+
+func (u *ConsoleUI) showFileDetails(f *domain.RemoteFile) {
+	fmt.Printf("\n--- File Details ---\n")
+	fmt.Printf("Path:     %s\n", f.Meta.Path)
+	fmt.Printf("Size:     %s\n", formatSize(f.Size))
+	fmt.Printf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339))
+	if f.Meta.Checksum != "" {
+		fmt.Printf("Checksum: %s\n", f.Meta.Checksum)
+	}
+	if f.Meta.Flags != "" {
+		fmt.Printf("Flags:    %s\n", f.Meta.Flags)
+	}
+	fmt.Printf("MsgID:    %d\n", f.MessageID)
+	fmt.Printf("--------------------\n\n")
+
+	promptContinue := promptui.Prompt{
+		Label:     "Press Enter to continue browsing",
+		IsConfirm: false,
+	}
+	promptContinue.Run()
 }

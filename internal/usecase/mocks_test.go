@@ -1,0 +1,136 @@
+package usecase
+
+import (
+	"context"
+	"io"
+	"strings"
+	"tg-blobsync/internal/domain"
+)
+
+// MockFileSystem
+type MockFileSystem struct {
+	Files map[string]domain.LocalFile
+	Data  map[string][]byte
+}
+
+func NewMockFileSystem() *MockFileSystem {
+	return &MockFileSystem{
+		Files: make(map[string]domain.LocalFile),
+		Data:  make(map[string][]byte),
+	}
+}
+
+func (m *MockFileSystem) ListFiles(root string, skipMD5 bool) ([]domain.LocalFile, error) {
+	var list []domain.LocalFile
+	for _, f := range m.Files {
+		list = append(list, f)
+	}
+	return list, nil
+}
+
+func (m *MockFileSystem) ReadFile(path string) (io.ReadCloser, error) {
+	if data, ok := m.Data[path]; ok {
+		return io.NopCloser(strings.NewReader(string(data))), nil
+	}
+	return nil, io.EOF
+}
+
+func (m *MockFileSystem) WriteFile(path string, data io.Reader) error {
+	content, _ := io.ReadAll(data)
+	m.Data[path] = content
+	return nil
+}
+
+func (m *MockFileSystem) SetModTime(path string, modTime int64) error {
+	return nil
+}
+
+func (m *MockFileSystem) DeleteFile(path string) error {
+	delete(m.Data, path)
+	return nil
+}
+
+func (m *MockFileSystem) EnsureDir(path string) error {
+	return nil
+}
+
+// MockBlobStorage
+type MockBlobStorage struct {
+	Files  map[int64]map[int64][]domain.RemoteFile
+	Groups []domain.Group
+	Topics map[int64][]domain.Topic
+}
+
+func NewMockBlobStorage() *MockBlobStorage {
+	return &MockBlobStorage{
+		Files:  make(map[int64]map[int64][]domain.RemoteFile),
+		Groups: []domain.Group{},
+		Topics: make(map[int64][]domain.Topic),
+	}
+}
+
+func (m *MockBlobStorage) ListGroups(ctx context.Context) ([]domain.Group, error) {
+	return m.Groups, nil
+}
+func (m *MockBlobStorage) ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error) {
+	if topics, ok := m.Topics[groupID]; ok {
+		return topics, nil
+	}
+	return nil, nil
+}
+
+func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error) {
+	if topics, ok := m.Files[groupID]; ok {
+		if files, ok := topics[topicID]; ok {
+			return files, nil
+		}
+	}
+	return []domain.RemoteFile{}, nil
+}
+
+func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+	return nil
+}
+
+func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
+	return nil
+}
+
+func (m *MockBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("dummy content")), nil
+}
+
+func (m *MockBlobStorage) Close() error {
+	return nil
+}
+
+func (m *MockBlobStorage) SetProgressTracker(tracker domain.ProgressTracker) {}
+
+// MockUserInterface
+type MockUserInterface struct {
+	Confirmed bool
+}
+
+func (m *MockUserInterface) ConfirmSync(plan domain.SyncPlan) (bool, error) {
+	return m.Confirmed, nil
+}
+func (m *MockUserInterface) SetTotalFiles(total int)                            {}
+func (m *MockUserInterface) Start(name string, total int64) domain.ProgressTask { return &MockTask{} }
+func (m *MockUserInterface) Wait()                                              {}
+
+type MockTask struct{}
+
+func (m *MockTask) Increment(n int)          {}
+func (m *MockTask) SetCurrent(current int64) {}
+func (m *MockTask) Complete()                {}
+func (m *MockTask) Abort()                   {}
+
+// MockBrowseUI
+type MockBrowseUI struct {
+	Files []domain.RemoteFile
+}
+
+func (m *MockBrowseUI) BrowseFiles(files []domain.RemoteFile) error {
+	m.Files = files
+	return nil
+}

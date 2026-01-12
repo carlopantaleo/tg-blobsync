@@ -18,7 +18,6 @@ func (t *TelegramClient) ListGroups(ctx context.Context) ([]domain.Group, error)
 		return nil, err
 	}
 
-	var groups []domain.Group
 	var chats []tg.ChatClass
 
 	switch d := dialogs.(type) {
@@ -28,6 +27,11 @@ func (t *TelegramClient) ListGroups(ctx context.Context) ([]domain.Group, error)
 		chats = d.Chats
 	}
 
+	return t.parseChatsToGroups(chats), nil
+}
+
+func (t *TelegramClient) parseChatsToGroups(chats []tg.ChatClass) []domain.Group {
+	var groups []domain.Group
 	for _, chat := range chats {
 		switch c := chat.(type) {
 		case *tg.Channel:
@@ -40,8 +44,7 @@ func (t *TelegramClient) ListGroups(ctx context.Context) ([]domain.Group, error)
 			}
 		}
 	}
-
-	return groups, nil
+	return groups
 }
 
 // ResolveGroup ensures the AccessHash for the given groupID is cached.
@@ -75,8 +78,12 @@ func (t *TelegramClient) ListTopics(ctx context.Context, groupID int64) ([]domai
 		return nil, err
 	}
 
+	return t.parseTopicsToDomain(res.Topics), nil
+}
+
+func (t *TelegramClient) parseTopicsToDomain(tgTopics []tg.ForumTopicClass) []domain.Topic {
 	var topics []domain.Topic
-	for _, topic := range res.Topics {
+	for _, topic := range tgTopics {
 		switch t := topic.(type) {
 		case *tg.ForumTopic:
 			topics = append(topics, domain.Topic{
@@ -85,6 +92,5 @@ func (t *TelegramClient) ListTopics(ctx context.Context, groupID int64) ([]domai
 			})
 		}
 	}
-
-	return topics, nil
+	return topics
 }
