@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"sort"
 	"tg-blobsync/internal/domain"
 )
 
@@ -37,6 +38,7 @@ func (d *differ) DiffPush(local map[string]domain.LocalFile, remote map[string]d
 			item.Reason = "New file"
 			items = append(items, item)
 			summary.ToUpload++
+			summary.TotalSize += localFile.Size
 		} else {
 			item.RemoteFile = &remoteFile
 			if d.shouldUpdate(localFile, remoteFile) {
@@ -44,6 +46,7 @@ func (d *differ) DiffPush(local map[string]domain.LocalFile, remote map[string]d
 				item.Reason = "Changed"
 				items = append(items, item)
 				summary.ToUpdate++
+				summary.TotalSize += localFile.Size
 			}
 		}
 	}
@@ -58,8 +61,14 @@ func (d *differ) DiffPush(local map[string]domain.LocalFile, remote map[string]d
 				Reason:     "Deleted locally",
 			})
 			summary.ToDelete++
+			summary.TotalSize += remoteFile.Size
 		}
 	}
+
+	// Sort items alphabetically by path
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Path < items[j].Path
+	})
 
 	summary.Total = len(items)
 	return domain.SyncPlan{Items: items, Summary: summary}
@@ -83,6 +92,7 @@ func (d *differ) DiffPull(local map[string]domain.LocalFile, remote map[string]d
 			item.Reason = "New remote file"
 			items = append(items, item)
 			summary.ToDownload++
+			summary.TotalSize += remoteFile.Size
 		} else {
 			item.LocalFile = &localFile
 			if d.shouldUpdate(localFile, remoteFile) {
@@ -90,6 +100,7 @@ func (d *differ) DiffPull(local map[string]domain.LocalFile, remote map[string]d
 				item.Reason = "Changed remote"
 				items = append(items, item)
 				summary.ToUpdate++
+				summary.TotalSize += remoteFile.Size
 			}
 		}
 	}
@@ -104,8 +115,14 @@ func (d *differ) DiffPull(local map[string]domain.LocalFile, remote map[string]d
 				Reason:    "Deleted remotely",
 			})
 			summary.ToDelete++
+			summary.TotalSize += localFile.Size
 		}
 	}
+
+	// Sort items alphabetically by path
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Path < items[j].Path
+	})
 
 	summary.Total = len(items)
 	return domain.SyncPlan{Items: items, Summary: summary}

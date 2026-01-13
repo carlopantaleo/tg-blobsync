@@ -69,4 +69,5 @@ type SyncSummary struct {
 	ToUpdate   int
 	ToDelete   int
 	Total      int
+	TotalSize  int64
 }

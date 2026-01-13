@@ -23,10 +23,10 @@ func TestDiffer_DiffPush(t *testing.T) {
 	plan := differ.DiffPush(local, remote)
 
 	// Expected:
-	// new.txt -> UPLOAD
-	// changed.txt -> UPLOAD
-	// same.txt -> nothing
-	// deleted.txt -> DELETE_REMOTE
+	// changed.txt -> UPLOAD (30 bytes)
+	// deleted.txt -> DELETE_REMOTE (40 bytes)
+	// new.txt     -> UPLOAD (10 bytes)
+	// Total size: 30 + 40 + 10 = 80 bytes
 
 	if plan.Summary.ToUpload != 1 {
 		t.Errorf("Expected 1 upload (new), got %d", plan.Summary.ToUpload)
@@ -37,8 +37,22 @@ func TestDiffer_DiffPush(t *testing.T) {
 	if plan.Summary.ToDelete != 1 {
 		t.Errorf("Expected 1 delete, got %d", plan.Summary.ToDelete)
 	}
+	if plan.Summary.TotalSize != 80 {
+		t.Errorf("Expected total size 80, got %d", plan.Summary.TotalSize)
+	}
 
-	// Verify items
+	// Verify items are sorted alphabetically
+	expectedOrder := []string{"changed.txt", "deleted.txt", "new.txt"}
+	if len(plan.Items) != len(expectedOrder) {
+		t.Fatalf("Expected %d items, got %d", len(expectedOrder), len(plan.Items))
+	}
+	for i, item := range plan.Items {
+		if item.Path != expectedOrder[i] {
+			t.Errorf("Item at index %d: expected path %s, got %s", i, expectedOrder[i], item.Path)
+		}
+	}
+
+	// Verify actions
 	actions := make(map[string]domain.SyncActionType)
 	for _, item := range plan.Items {
 		actions[item.Path] = item.Action
@@ -73,10 +87,10 @@ func TestDiffer_DiffPull(t *testing.T) {
 	plan := differ.DiffPull(local, remote)
 
 	// Expected:
-	// new.txt -> DOWNLOAD (New remote file)
-	// same.txt -> nothing
-	// changed.txt -> DOWNLOAD (Changed remote - ModTime diff)
-	// deleted.txt -> DELETE_LOCAL (Deleted remotely)
+	// changed.txt -> DOWNLOAD (Changed remote - 30 bytes)
+	// deleted.txt -> DELETE_LOCAL (Deleted remotely - 40 bytes)
+	// new.txt     -> DOWNLOAD (New remote file - 10 bytes)
+	// Total size: 30 + 40 + 10 = 80 bytes
 
 	if plan.Summary.ToDownload != 1 {
 		t.Errorf("Expected 1 download (new), got %d", plan.Summary.ToDownload)
@@ -86,6 +100,20 @@ func TestDiffer_DiffPull(t *testing.T) {
 	}
 	if plan.Summary.ToDelete != 1 {
 		t.Errorf("Expected 1 delete local, got %d", plan.Summary.ToDelete)
+	}
+	if plan.Summary.TotalSize != 80 {
+		t.Errorf("Expected total size 80, got %d", plan.Summary.TotalSize)
+	}
+
+	// Verify items are sorted alphabetically
+	expectedOrder := []string{"changed.txt", "deleted.txt", "new.txt"}
+	if len(plan.Items) != len(expectedOrder) {
+		t.Fatalf("Expected %d items, got %d", len(expectedOrder), len(plan.Items))
+	}
+	for i, item := range plan.Items {
+		if item.Path != expectedOrder[i] {
+			t.Errorf("Item at index %d: expected path %s, got %s", i, expectedOrder[i], item.Path)
+		}
 	}
 
 	actions := make(map[string]domain.SyncActionType)
