@@ -1,20 +1,20 @@
 # TG-BlobSync
 
-TG-BlobSync is a powerful CLI tool written in go, designed to synchronize local directories with Telegram Forum Topics. It uses Telegram as a blob storage, allowing you to back up and sync files efficiently.
+TG-BlobSync is a conceptual tool to demonstrate the feasibility of using Telegram as a free unlimited blob storage for files. It allows you to sync files between your local machine and Telegram forum topics, which act as buckets (being Telegram forum groups a sort of "storage account", in Azure's terms), in a way similar to `rsync` or `rclone`.
 
-This is a conceptual tool to demonstrate the feasibility of using Telegram as a free unlimited blob storage for files. Please bear in mind that Telegram is not intended to be used as a blob storage and I strongly recommend against using it for production purposes.
+Please bear in mind that Telegram is not intended to be used as a blob storage and I strongly recommend against using it for production purposes.
 
 ## Features
 
 - **Bidirectional Sync**: Supports `push` (local to Telegram) and `pull` (Telegram to local) operations.
 - **Interactive Browser**: Navigate and explore virtual directories and files in a topic using the `list` command.
 - **Efficient Synchronization**: Compare files using MD5 checksums or modification time (`--skip-md5`).
-- **High Performance**: Multithreaded file processing and parallelized chunk uploads for large files.
-- **Telegram Forum Support**: Organizes files within specific Supergroup Topics.
+- **High Performance**: Multithreaded file processing and parallelized chunk uploads for large files (works best with Telegram Premium).
+- **Forum Topics as Buckets**: Organizes files within specific Supergroup (Forum) Topics.
 - **Smart Handling of Special Files**: Correctly handles 0-byte (empty) files, which are natively rejected by Telegram.
 - **Metadata Preservation**: Stores and restores original file modification times and paths.
 - **Non-Interactive Mode**: Fully scriptable with the `--non-interactive` flag.
-- **Beautiful UI**: Interactive progress bars and selection menus using `mpb` and `promptui`.
+- **Nice UI**: Interactive progress bars and selection menus using `mpb` and `promptui`.
 
 ## Installation
 
@@ -71,7 +71,7 @@ tgblobsync list [ --group-id <ID> [ --topic-id <ID> ] ]
 | `--sub-dir` | Synchronize only a specific subdirectory within the topic | - |
 | `--group-id` | ID of the Supergroup | Interactive selection |
 | `--topic-id` | ID of the Topic (TopID) | Interactive selection |
-| `--workers` | Number of concurrent files to process | 4 |
+| `--workers` | Number of concurrent files to process | 1 |
 | `--upload-threads` | Number of parallel threads for a single file upload | 8 |
 | `--skip-md5` | Use modification time and size instead of MD5 checksums | false |
 | `--non-interactive` | Disable interactive UI and progress bars | false |
