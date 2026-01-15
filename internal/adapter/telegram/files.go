@@ -46,14 +46,16 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 		}
 	}()
 
+	totalMessages := -1
 	for {
 		var messages []tg.MessageClass
 		if useTakeout {
 			var h tg.MessagesChannelMessages
 			err := t.invoker.Invoke(ctx, &tg.InvokeWithTakeoutRequest{
 				TakeoutID: takeoutID,
-				Query: &tg.MessagesGetHistoryRequest{
+				Query: &tg.MessagesGetRepliesRequest{
 					Peer:     inputPeer,
+					MsgID:    int(topicID),
 					OffsetID: offsetID,
 					Limit:    limit,
 				},
@@ -62,9 +64,11 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 				return nil, err
 			}
 			messages = h.Messages
+			totalMessages = h.Count
 		} else {
-			history, err := t.api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			history, err := t.api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
 				Peer:     inputPeer,
+				MsgID:    int(topicID),
 				OffsetID: offsetID,
 				Limit:    limit,
 			})
@@ -75,15 +79,18 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 			switch h := history.(type) {
 			case *tg.MessagesChannelMessages:
 				messages = h.Messages
+				totalMessages = h.Count
 			case *tg.MessagesMessagesSlice:
 				messages = h.Messages
+				totalMessages = h.Count
 			case *tg.MessagesMessages:
 				messages = h.Messages
+				totalMessages = len(h.Messages)
 			}
 
-			// Switch to Takeout if total messages > 2900 and we haven't already
-			if len(messages) > 0 && messages[len(messages)-1].GetID() > 2900 && !useTakeout {
-				log.Printf("%d messages detected, switching to Takeout API for next batches", messages[len(messages)-1].GetID())
+			// Switch to Takeout if total messages in topic > 3000 and we haven't already
+			if totalMessages > 3000 && !useTakeout {
+				log.Printf("%d messages in topic detected, switching to Takeout API for next batches", totalMessages)
 				takeout, err := t.api.AccountInitTakeoutSession(ctx, &tg.AccountInitTakeoutSessionRequest{
 					Flags: 1 << 0, // bit 0 is messages
 				})

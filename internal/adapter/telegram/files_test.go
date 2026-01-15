@@ -76,12 +76,15 @@ func TestTelegramClient_ListFiles(t *testing.T) {
 		},
 	}
 
-	// Mock response
-	mockInvoker.Register(&tg.MessagesGetHistoryRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+	// Mock MessagesGetRepliesRequest
+	mockInvoker.Register(&tg.MessagesGetRepliesRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 		// Verify input if needed
-		req := input.(*tg.MessagesGetHistoryRequest)
+		req := input.(*tg.MessagesGetRepliesRequest)
 		if req.Peer == nil {
 			return errors.New("missing peer")
+		}
+		if req.MsgID != int(topicID) {
+			return errors.New("unexpected topic ID")
 		}
 
 		if req.OffsetID > 0 {
@@ -402,9 +405,9 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 	}
 	metaBytes, _ := json.Marshal(fileMeta)
 
-	// High ID message to trigger Takeout
+	// High ID message to trigger Takeout (no longer relying on ID, but keeping it high for consistency)
 	highIDMsg := &tg.Message{
-		ID:      3000, // > 2900 to trigger Takeout
+		ID:      3000,
 		Date:    int(time.Now().Unix()),
 		PeerID:  &tg.PeerChannel{ChannelID: 100},
 		Message: "not a file",
@@ -435,14 +438,14 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 	messagesGetHistoryCallCount := 0
 	invokeWithTakeoutCallCount := 0
 
-	// Mock MessagesGetHistoryRequest (initial call to trigger Takeout)
-	mockInvoker.Register(&tg.MessagesGetHistoryRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+	// Mock MessagesGetRepliesRequest (initial call to trigger Takeout)
+	mockInvoker.Register(&tg.MessagesGetRepliesRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 		messagesGetHistoryCallCount++
 		if messagesGetHistoryCallCount == 1 {
-			// Return high ID message to trigger Takeout
+			// Return high Count to trigger Takeout
 			resp := &tg.MessagesChannelMessages{
 				Messages: []tg.MessageClass{highIDMsg},
-				Count:    1,
+				Count:    3001,
 				Chats:    []tg.ChatClass{},
 				Users:    []tg.UserClass{},
 			}
@@ -453,7 +456,7 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 			return output.Decode(buf)
 		}
 		// Should not be called again
-		return errors.New("unexpected MessagesGetHistoryRequest call")
+		return errors.New("unexpected MessagesGetRepliesRequest call")
 	})
 
 	// Mock AccountInitTakeoutSession
@@ -476,11 +479,12 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 			return errors.New("invalid takeout ID")
 		}
 
-		if _, ok := req.Query.(*tg.MessagesGetHistoryRequest); !ok {
+		if _, ok := req.Query.(*tg.MessagesGetRepliesRequest); !ok {
 			return errors.New("invalid inner query")
 		}
 
-		if invokeWithTakeoutCallCount == 1 {
+		switch invokeWithTakeoutCallCount {
+		case 1:
 			// First Takeout call: return file message
 			resp := &tg.MessagesChannelMessages{
 				Messages: []tg.MessageClass{fileMsg},
@@ -493,7 +497,7 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 				return err
 			}
 			return output.Decode(buf)
-		} else if invokeWithTakeoutCallCount == 2 {
+		case 2:
 			// Second Takeout call: return empty to stop
 			resp := &tg.MessagesChannelMessages{
 				Messages: []tg.MessageClass{},
