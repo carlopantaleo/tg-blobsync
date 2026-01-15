@@ -11,6 +11,7 @@ import (
 
 	"time"
 
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
@@ -21,7 +22,8 @@ import (
 
 // TelegramClient implements domain.BlobStorage using gotd.
 type TelegramClient struct {
-	client   *telegram.Client
+	invoker  Invoker
+	tgClient *telegram.Client
 	api      *tg.Client
 	sender   *message.Sender
 	uploader *uploader.Uploader
@@ -34,6 +36,11 @@ type TelegramClient struct {
 
 	progressTracker domain.ProgressTracker
 	uploadThreads   int
+}
+
+// Invoker interface for mocking Invoke calls.
+type Invoker interface {
+	Invoke(ctx context.Context, input bin.Encoder, output bin.Decoder) error
 }
 
 // AuthInput defines an interface for interactive authentication input.
@@ -56,7 +63,7 @@ func NewTelegramClient(appID int, appHash string, sessionFile string, input Auth
 	client := telegram.NewClient(appID, appHash, opts)
 
 	tc := &TelegramClient{
-		client:         client,
+		tgClient:       client,
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
@@ -87,9 +94,9 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 
 	go func() {
 		log.Println("[Telegram] Starting client run loop...")
-		err := t.client.Run(ctx, func(ctx context.Context) error {
+		err := t.tgClient.Run(ctx, func(ctx context.Context) error {
 			// Auth flow
-			status, err := t.client.Auth().Status(ctx)
+			status, err := t.tgClient.Auth().Status(ctx)
 			if err != nil {
 				return fmt.Errorf("auth status check failed: %w", err)
 			}
@@ -100,14 +107,15 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 					termAuth{input: input},
 					auth.SendCodeOptions{},
 				)
-				if err := t.client.Auth().IfNecessary(ctx, flow); err != nil {
+				if err := t.tgClient.Auth().IfNecessary(ctx, flow); err != nil {
 					return fmt.Errorf("auth flow failed: %w", err)
 				}
 				log.Println("[Telegram] Authorization successful")
 			}
 
 			// Initialize helpers
-			t.api = t.client.API()
+			t.api = t.tgClient.API()
+			t.invoker = t.tgClient
 			t.sender = message.NewSender(t.api)
 			t.uploader = uploader.NewUploader(t.api).
 				WithProgress(t).

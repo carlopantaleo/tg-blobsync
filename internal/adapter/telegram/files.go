@@ -50,7 +50,7 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 		var messages []tg.MessageClass
 		if useTakeout {
 			var h tg.MessagesChannelMessages
-			err := t.client.Invoke(ctx, &tg.InvokeWithTakeoutRequest{
+			err := t.invoker.Invoke(ctx, &tg.InvokeWithTakeoutRequest{
 				TakeoutID: takeoutID,
 				Query: &tg.MessagesGetHistoryRequest{
 					Peer:     inputPeer,
