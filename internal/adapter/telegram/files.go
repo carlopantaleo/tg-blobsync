@@ -23,6 +23,7 @@ import (
 )
 
 // ListFiles returns files from the topic.
+// It switches to Takeout API only if the total message count is > 3000 to avoid FLOOD_WAIT.
 func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error) {
 	accessHash, _ := t.getAccessHash(groupID)
 	inputPeer := &tg.InputPeerChannel{
@@ -33,25 +34,66 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 	var files []domain.RemoteFile
 	offsetID := 0
 	limit := 100
+	useTakeout := false
+	var takeoutID int64
+
+	// Cleanup takeout if initialized
+	defer func() {
+		if useTakeout {
+			_, _ = t.api.AccountFinishTakeoutSession(ctx, &tg.AccountFinishTakeoutSessionRequest{
+				Success: true,
+			})
+		}
+	}()
 
 	for {
-		history, err := t.api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
-			Peer:     inputPeer,
-			OffsetID: offsetID,
-			Limit:    limit,
-		})
-		if err != nil {
-			return nil, err
-		}
-
 		var messages []tg.MessageClass
-		switch h := history.(type) {
-		case *tg.MessagesChannelMessages:
+		if useTakeout {
+			var h tg.MessagesChannelMessages
+			err := t.client.Invoke(ctx, &tg.InvokeWithTakeoutRequest{
+				TakeoutID: takeoutID,
+				Query: &tg.MessagesGetHistoryRequest{
+					Peer:     inputPeer,
+					OffsetID: offsetID,
+					Limit:    limit,
+				},
+			}, &h)
+			if err != nil {
+				return nil, err
+			}
 			messages = h.Messages
-		case *tg.MessagesMessagesSlice:
-			messages = h.Messages
-		case *tg.MessagesMessages:
-			messages = h.Messages
+		} else {
+			history, err := t.api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+				Peer:     inputPeer,
+				OffsetID: offsetID,
+				Limit:    limit,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			switch h := history.(type) {
+			case *tg.MessagesChannelMessages:
+				messages = h.Messages
+			case *tg.MessagesMessagesSlice:
+				messages = h.Messages
+			case *tg.MessagesMessages:
+				messages = h.Messages
+			}
+
+			// Switch to Takeout if total messages > 2900 and we haven't already
+			if len(messages) > 0 && messages[len(messages)-1].GetID() > 2900 && !useTakeout {
+				log.Printf("%d messages detected, switching to Takeout API for next batches", messages[len(messages)-1].GetID())
+				takeout, err := t.api.AccountInitTakeoutSession(ctx, &tg.AccountInitTakeoutSessionRequest{
+					Flags: 1 << 0, // bit 0 is messages
+				})
+				if err == nil {
+					useTakeout = true
+					takeoutID = takeout.ID
+				} else {
+					log.Printf("[warn] ListFiles: failed to init takeout session: %v. Continuing with standard API.", err)
+				}
+			}
 		}
 
 		if len(messages) == 0 {
