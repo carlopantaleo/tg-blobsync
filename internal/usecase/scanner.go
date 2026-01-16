@@ -47,13 +47,9 @@ func (s *scanner) ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 	result := make(map[string]domain.LocalFile)
 	for _, f := range files {
 		path := filepath.ToSlash(f.Path)
-		// We don't filter by subDir locally anymore because rootDir is the local source.
-		// However, we need to map local paths to remote paths if subDir is present.
-		remotePath := path
-		if s.subDir != "" {
-			remotePath = s.subDir + "/" + path
-		}
-		result[remotePath] = f
+		// The path is already relative to rootDir.
+		// We use this relative path as the key for synchronization.
+		result[path] = f
 	}
 	return result, nil
 }
@@ -70,6 +66,15 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 		if s.subDir != "" {
 			if !strings.HasPrefix(path, s.subDir+"/") && path != s.subDir {
 				continue
+			}
+			// Map remote path to a relative path starting from subDir.
+			// e.g. remote "subdir/file.txt" with subDir "subdir" becomes "file.txt"
+			if path == s.subDir {
+				// This shouldn't happen for files if subDir is a directory,
+				// but let's be safe.
+				path = filepath.Base(path)
+			} else {
+				path = strings.TrimPrefix(path, s.subDir+"/")
 			}
 		}
 		// Dedup: keep first (newest)

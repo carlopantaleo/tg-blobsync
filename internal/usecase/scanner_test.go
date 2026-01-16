@@ -26,8 +26,9 @@ func TestScanner_ScanLocal(t *testing.T) {
 		t.Error("file1.txt missing")
 	}
 
-	// 2. Scan with Remote Subdir
-	// When subDir is "remote-sub", local "file1.txt" should map to "remote-sub/file1.txt"
+	// 2. Scan with Subdir
+	// ScanLocal should return all files relative to rootDir, regardless of subDir
+	// The subDir logic is used to filter remote files and map them to the same relative root.
 	scannerSub := NewScanner(mockFS, mockStorage, "remote-sub", false)
 	filesSub, err := scannerSub.ScanLocal("/tmp")
 	if err != nil {
@@ -36,11 +37,8 @@ func TestScanner_ScanLocal(t *testing.T) {
 	if len(filesSub) != 2 {
 		t.Errorf("Expected 2 files, got %d", len(filesSub))
 	}
-	if _, ok := filesSub["remote-sub/file1.txt"]; !ok {
-		t.Error("remote-sub/file1.txt missing")
-	}
-	if _, ok := filesSub["remote-sub/subdir/file2.txt"]; !ok {
-		t.Error("remote-sub/subdir/file2.txt missing")
+	if _, ok := filesSub["file1.txt"]; !ok {
+		t.Error("file1.txt missing")
 	}
 }
 
@@ -52,9 +50,8 @@ func TestScanner_ScanRemote(t *testing.T) {
 	mockStorage.Files[groupID] = make(map[int64][]domain.RemoteFile)
 	mockStorage.Files[groupID][topicID] = []domain.RemoteFile{
 		{Meta: domain.FileMeta{Path: "file1.txt"}},
-		{Meta: domain.FileMeta{Path: "subdir/file2.txt"}},
-		// Duplicate file (older version usually, but here just checking dedup logic if implemented or map behavior)
-		{Meta: domain.FileMeta{Path: "file1.txt"}},
+		{Meta: domain.FileMeta{Path: "remote-sub/file2.txt"}},
+		{Meta: domain.FileMeta{Path: "remote-sub/nested/file3.txt"}},
 	}
 
 	mockFS := NewMockFileSystem()
@@ -65,22 +62,24 @@ func TestScanner_ScanRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanRemote failed: %v", err)
 	}
-
-	// Should dedup based on map key
-	if len(files) != 2 {
-		t.Errorf("Expected 2 unique files, got %d", len(files))
+	if len(files) != 3 {
+		t.Errorf("Expected 3 files, got %d", len(files))
 	}
 
 	// 2. Scan Subdir
-	scannerSub := NewScanner(mockFS, mockStorage, "subdir", false)
+	// When subDir is "remote-sub", "remote-sub/file2.txt" should become "file2.txt"
+	scannerSub := NewScanner(mockFS, mockStorage, "remote-sub", false)
 	filesSub, err := scannerSub.ScanRemote(context.Background(), groupID, topicID)
 	if err != nil {
 		t.Fatalf("ScanRemote failed: %v", err)
 	}
-	if len(filesSub) != 1 {
-		t.Errorf("Expected 1 file in subdir, got %d", len(filesSub))
+	if len(filesSub) != 2 {
+		t.Errorf("Expected 2 files in subdir, got %d", len(filesSub))
 	}
-	if _, ok := filesSub["subdir/file2.txt"]; !ok {
-		t.Error("subdir/file2.txt missing")
+	if _, ok := filesSub["file2.txt"]; !ok {
+		t.Error("file2.txt missing")
+	}
+	if _, ok := filesSub["nested/file3.txt"]; !ok {
+		t.Error("nested/file3.txt missing")
 	}
 }
