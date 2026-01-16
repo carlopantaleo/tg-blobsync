@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"strings"
 	"tg-blobsync/internal/domain"
 
 	"github.com/gotd/td/tg"
@@ -28,6 +29,20 @@ func (t *TelegramClient) ListGroups(ctx context.Context) ([]domain.Group, error)
 	}
 
 	return t.parseChatsToGroups(chats), nil
+}
+
+// FindGroupByName searches for a group by its title.
+func (t *TelegramClient) FindGroupByName(ctx context.Context, name string) (*domain.Group, error) {
+	groups, err := t.ListGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
+		if strings.EqualFold(g.Title, name) {
+			return &g, nil
+		}
+	}
+	return nil, fmt.Errorf("group '%s' not found", name)
 }
 
 func (t *TelegramClient) parseChatsToGroups(chats []tg.ChatClass) []domain.Group {
@@ -79,6 +94,20 @@ func (t *TelegramClient) ListTopics(ctx context.Context, groupID int64) ([]domai
 	}
 
 	return t.parseTopicsToDomain(res.Topics), nil
+}
+
+// FindTopicByName searches for a topic by its title in a given group.
+func (t *TelegramClient) FindTopicByName(ctx context.Context, groupID int64, name string) (*domain.Topic, error) {
+	topics, err := t.ListTopics(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	for _, tp := range topics {
+		if strings.EqualFold(tp.Title, name) {
+			return &tp, nil
+		}
+	}
+	return nil, fmt.Errorf("topic '%s' not found in group %d", name, groupID)
 }
 
 func (t *TelegramClient) parseTopicsToDomain(tgTopics []tg.ForumTopicClass) []domain.Topic {

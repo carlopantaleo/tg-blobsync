@@ -29,7 +29,7 @@ func TestParseCLI(t *testing.T) {
 	}{
 		{
 			name:        "Valid Push Command",
-			args:        []string{"tgblobsync", "push", "--dir", "/tmp/data", "--group-id", "123", "--topic-id", "456"},
+			args:        []string{"tgblobsync", "push", "/tmp/data", "MyGroup:MyTopic"},
 			envAppID:    "12345",
 			envAppHash:  "abcdef",
 			expectedCmd: "push",
@@ -37,7 +37,7 @@ func TestParseCLI(t *testing.T) {
 		},
 		{
 			name:        "Valid Pull Command",
-			args:        []string{"tgblobsync", "pull", "--dir", "/tmp/data", "--group-id", "123", "--topic-id", "456"},
+			args:        []string{"tgblobsync", "pull", "MyGroup:MyTopic", "/tmp/data"},
 			envAppID:    "12345",
 			envAppHash:  "abcdef",
 			expectedCmd: "pull",
@@ -45,7 +45,7 @@ func TestParseCLI(t *testing.T) {
 		},
 		{
 			name:        "Missing Dir for Push",
-			args:        []string{"tgblobsync", "push", "--group-id", "123", "--topic-id", "456"},
+			args:        []string{"tgblobsync", "push"},
 			envAppID:    "12345",
 			envAppHash:  "abcdef",
 			expectedCmd: "push",
@@ -71,7 +71,7 @@ func TestParseCLI(t *testing.T) {
 		},
 		{
 			name:        "Non-interactive missing IDs",
-			args:        []string{"tgblobsync", "push", "--dir", "/tmp", "--non-interactive"},
+			args:        []string{"tgblobsync", "push", "--non-interactive", "/tmp"},
 			envAppID:    "12345",
 			envAppHash:  "abcdef",
 			expectedCmd: "push",

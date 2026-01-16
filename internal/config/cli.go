@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // CLIConfig holds the configuration parsed from command line arguments.
@@ -13,8 +14,8 @@ type CLIConfig struct {
 	AppID          int
 	AppHash        string
 	SessionPath    string
-	GroupID        int64
-	TopicID        int64
+	GroupName      string
+	TopicName      string
 	DirPath        string
 	SubDir         string
 	Workers        int
@@ -34,17 +35,45 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 
 	cfg := &CLIConfig{Command: cmd}
 
-	fs.Int64Var(&cfg.GroupID, "group-id", 0, "ID of the Supergroup")
-	fs.Int64Var(&cfg.TopicID, "topic-id", 0, "ID of the Topic")
-	fs.StringVar(&cfg.DirPath, "dir", "", "Path to the directory to sync (required for push/pull)")
+	fs.StringVar(&cfg.GroupName, "group", "", "Name of the Supergroup")
+	fs.StringVar(&cfg.TopicName, "topic", "", "Name of the Topic")
 	fs.StringVar(&cfg.SubDir, "sub-dir", "", "Synchronize only a specific subdirectory within the topic")
 	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
 	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
 	fs.BoolVar(&cfg.NonInteractive, "non-interactive", false, "Disable interactive UI and progress bars")
 
-	if err := fs.Parse(os.Args[2:]); err != nil {
+	// Parse flags first to separate them from positional arguments
+	// However, standard flag package expects flags before positional args.
+	// We'll handle positional args manually.
+
+	args := os.Args[2:]
+
+	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+
+	remaining := fs.Args()
+
+	switch cmd {
+case "push":
+		if len(remaining) > 0 {
+			cfg.DirPath = remaining[0]
+		}
+		if len(remaining) > 1 {
+			parseTarget(remaining[1], cfg)
+		}
+	case "pull":
+		if len(remaining) > 0 {
+			// Check if first arg is target or local path
+			// In pull, it's [<target>] <local-path>
+			if len(remaining) == 1 {
+				cfg.DirPath = remaining[0]
+			} else {
+				parseTarget(remaining[0], cfg)
+				cfg.DirPath = remaining[1]
+			}
+		}
 	}
 
 	// Validate App Credentials
@@ -75,14 +104,27 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 
 	// Command specific validation
 	if (cmd == "push" || cmd == "pull") && cfg.DirPath == "" {
-		return nil, fmt.Errorf("--dir is required for push/pull commands")
+		return nil, fmt.Errorf("local path is required for push/pull commands")
 	}
 
 	if cfg.NonInteractive {
-		if cfg.GroupID == 0 || cfg.TopicID == 0 {
-			return nil, fmt.Errorf("--group-id and --topic-id are required in non-interactive mode")
+		if cfg.GroupName == "" || cfg.TopicName == "" {
+			return nil, fmt.Errorf("group and topic names are required in non-interactive mode")
 		}
 	}
 
 	return cfg, nil
+}
+
+func parseTarget(target string, cfg *CLIConfig) {
+	parts := strings.Split(target, ":")
+	if len(parts) > 0 && parts[0] != "" {
+		cfg.GroupName = parts[0]
+	}
+	if len(parts) > 1 && parts[1] != "" {
+		cfg.TopicName = parts[1]
+	}
+	if len(parts) > 2 && parts[2] != "" {
+		cfg.SubDir = parts[2]
+	}
 }

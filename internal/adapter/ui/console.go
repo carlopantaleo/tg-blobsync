@@ -323,9 +323,6 @@ func (u *ConsoleUI) SelectGroup(groups []domain.Group) (domain.Group, error) {
 
 // SelectTopic prompts the user to select a topic from the list.
 func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
-	// Add an option to create a new topic? Or just select existing.
-	// Spec says "User selects the topic".
-
 	if len(topics) == 0 {
 		return domain.Topic{}, errors.New("no topics available")
 	}
@@ -356,6 +353,36 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 	}
 
 	return topics[i], nil
+}
+
+// SelectSubDir prompts the user for a subdirectory path.
+func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
+	if len(existingSubDirs) == 0 {
+		return u.Prompt("Enter subdirectory path (optional, leave empty for root)")
+	}
+
+	// Add an option to enter a custom path
+	items := append([]string{"[ Root / No subdirectory ]", "[ Enter custom path ]"}, existingSubDirs...)
+
+	prompt := promptui.Select{
+		Label: "Select or enter subdirectory",
+		Items: items,
+		Size:  10,
+	}
+
+	idx, result, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+
+	switch idx {
+	case 0:
+		return "", nil
+	case 1:
+		return u.Prompt("Enter custom subdirectory path")
+	default:
+		return result, nil
+	}
 }
 
 // AskToCreateTopic prompts to create a new topic if needed (Not in requirements but useful)

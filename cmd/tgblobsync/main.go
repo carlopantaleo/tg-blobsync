@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 
 	"tg-blobsync/internal/adapter/filesystem"
 	"tg-blobsync/internal/adapter/telegram"
@@ -56,74 +60,130 @@ func run() error {
 	tgClient.SetUploadThreads(cfg.UploadThreads)
 	tgClient.SetProgressTracker(console)
 
-	if err := ensureSelection(ctx, cfg, tgClient, console); err != nil {
+	groupID, topicID, err := resolveIdentifiers(ctx, cfg, tgClient, console)
+	if err != nil {
 		return err
 	}
 
 	switch cfg.Command {
 	case "push":
-		return runSync(ctx, cfg, tgClient, console, true)
+		return runSync(ctx, cfg, tgClient, console, true, groupID, topicID)
 	case "pull":
-		return runSync(ctx, cfg, tgClient, console, false)
+		return runSync(ctx, cfg, tgClient, console, false, groupID, topicID)
 	case "list":
-		return runList(ctx, cfg, tgClient, console)
+		return runList(ctx, tgClient, console, groupID, topicID)
 	default:
 		return fmt.Errorf("unknown command: %s", cfg.Command)
 	}
 }
 
-func ensureSelection(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) error {
-	selector := usecase.NewSelector(storage)
+func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
+	var groupID int64
+	var topicID int64
 
-	if cfg.GroupID == 0 {
-		log.Println("Fetching groups...")
-		groups, err := selector.ListGroups(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to list groups: %w", err)
+	// 1. Resolve Group
+	if cfg.GroupName != "" {
+		// Try to parse as ID first
+		if id, err := strconv.ParseInt(cfg.GroupName, 10, 64); err == nil {
+			groupID = id
+			if err := storage.ResolveGroup(ctx, groupID); err != nil {
+				return 0, 0, fmt.Errorf("failed to resolve group ID %d: %w", groupID, err)
+			}
+		} else {
+			// Resolve by name
+			g, err := storage.FindGroupByName(ctx, cfg.GroupName)
+			if err != nil {
+				return 0, 0, err
+			}
+			groupID = g.ID
 		}
-
-		selectedGroup, err := console.SelectGroup(groups)
-		if err != nil {
-			return fmt.Errorf("group selection failed: %w", err)
-		}
-		cfg.GroupID = selectedGroup.ID
-		log.Printf("Selected Group: %s (%d)", selectedGroup.Title, cfg.GroupID)
 	} else {
-		log.Printf("Resolving group %d...", cfg.GroupID)
-		if err := storage.ResolveGroup(ctx, cfg.GroupID); err != nil {
-			return fmt.Errorf("failed to resolve group: %w", err)
+		if cfg.NonInteractive {
+			return 0, 0, fmt.Errorf("group name is required in non-interactive mode")
 		}
+		log.Println("Fetching groups...")
+		groups, err := storage.ListGroups(ctx)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to list groups: %w", err)
+		}
+		selected, err := console.SelectGroup(groups)
+		if err != nil {
+			return 0, 0, err
+		}
+		groupID = selected.ID
 	}
 
-	if cfg.TopicID == 0 {
+	// 2. Resolve Topic
+	if cfg.TopicName != "" {
+		// Try to parse as ID first
+		if id, err := strconv.ParseInt(cfg.TopicName, 10, 64); err == nil {
+			topicID = id
+		} else {
+			// Resolve by name
+			t, err := storage.FindTopicByName(ctx, groupID, cfg.TopicName)
+			if err != nil {
+				return 0, 0, err
+			}
+			topicID = t.ID
+		}
+	} else {
+		if cfg.NonInteractive {
+			return 0, 0, fmt.Errorf("topic name is required in non-interactive mode")
+		}
 		log.Println("Fetching topics...")
-		topics, err := selector.ListTopics(ctx, cfg.GroupID)
+		topics, err := storage.ListTopics(ctx, groupID)
 		if err != nil {
-			return fmt.Errorf("failed to list topics: %w", err)
+			return 0, 0, fmt.Errorf("failed to list topics: %w", err)
 		}
-
-		selectedTopic, err := console.SelectTopic(topics)
+		selected, err := console.SelectTopic(topics)
 		if err != nil {
-			return fmt.Errorf("topic selection failed: %w", err)
+			return 0, 0, err
 		}
-		cfg.TopicID = selectedTopic.ID
-		log.Printf("Selected Topic: %s (%d)", selectedTopic.Title, cfg.TopicID)
+		topicID = selected.ID
 	}
-	return nil
+
+	// 3. SubDir selection (if not already specified)
+	if cfg.SubDir == "" && !cfg.NonInteractive && (cfg.Command == "push" || cfg.Command == "pull") {
+		// Fetch existing subdirs to help user
+		files, err := storage.ListFiles(ctx, groupID, topicID)
+		if err == nil {
+			subdirsMap := make(map[string]bool)
+			for _, f := range files {
+				path := filepath.ToSlash(f.Meta.Path)
+				parts := strings.Split(path, "/")
+				if len(parts) > 1 {
+					subdirsMap[parts[0]] = true
+				}
+			}
+			var existing []string
+			for s := range subdirsMap {
+				existing = append(existing, s)
+			}
+			sort.Strings(existing)
+
+			selectedSubDir, err := console.SelectSubDir(existing)
+			if err != nil {
+				return 0, 0, err
+			}
+			cfg.SubDir = selectedSubDir
+		}
+	}
+
+	return groupID, topicID, nil
 }
 
-func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, push bool) error {
+func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, push bool, groupID int64, topicID int64) error {
 	localFS := filesystem.NewLocalFileSystem()
 	syncer := usecase.NewSynchronizer(localFS, storage, cfg.Workers, ui, cfg.SkipMD5)
 	syncer.SetSubDir(cfg.SubDir)
 
 	if push {
-		return syncer.Push(ctx, cfg.DirPath, cfg.GroupID, cfg.TopicID)
+		return syncer.Push(ctx, cfg.DirPath, groupID, topicID)
 	}
-	return syncer.Pull(ctx, cfg.DirPath, cfg.GroupID, cfg.TopicID)
+	return syncer.Pull(ctx, cfg.DirPath, groupID, topicID)
 }
 
-func runList(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI) error {
+func runList(ctx context.Context, storage *telegram.TelegramClient, ui *ui.ConsoleUI, groupID, topicID int64) error {
 	browser := usecase.NewBrowser(storage, ui)
-	return browser.ListAndBrowse(ctx, cfg.GroupID, cfg.TopicID)
+	return browser.ListAndBrowse(ctx, groupID, topicID)
 }
