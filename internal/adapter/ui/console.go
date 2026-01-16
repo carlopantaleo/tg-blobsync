@@ -362,7 +362,13 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 	}
 
 	// Add an option to enter a custom path
-	items := append([]string{"[ Root / No subdirectory ]", "[ Enter custom path ]"}, existingSubDirs...)
+	items := []string{
+		"[ Root / No subdirectory ]",
+		"[ Enter custom path ]",
+	}
+	for _, s := range existingSubDirs {
+		items = append(items, fmt.Sprintf("\U0001F4C1 %s", s))
+	}
 
 	prompt := promptui.Select{
 		Label: "Select or enter subdirectory",
@@ -381,7 +387,8 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 	case 1:
 		return u.Prompt("Enter custom subdirectory path")
 	default:
-		return result, nil
+		// Remove the icon from the result
+		return strings.TrimPrefix(result, "\U0001F4C1 "), nil
 	}
 }
 

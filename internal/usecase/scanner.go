@@ -47,12 +47,13 @@ func (s *scanner) ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 	result := make(map[string]domain.LocalFile)
 	for _, f := range files {
 		path := filepath.ToSlash(f.Path)
+		// We don't filter by subDir locally anymore because rootDir is the local source.
+		// However, we need to map local paths to remote paths if subDir is present.
+		remotePath := path
 		if s.subDir != "" {
-			if !strings.HasPrefix(path, s.subDir+"/") && path != s.subDir {
-				continue
-			}
+			remotePath = s.subDir + "/" + path
 		}
-		result[path] = f
+		result[remotePath] = f
 	}
 	return result, nil
 }

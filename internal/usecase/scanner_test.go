@@ -26,17 +26,21 @@ func TestScanner_ScanLocal(t *testing.T) {
 		t.Error("file1.txt missing")
 	}
 
-	// 2. Scan Subdir
-	scannerSub := NewScanner(mockFS, mockStorage, "subdir", false)
+	// 2. Scan with Remote Subdir
+	// When subDir is "remote-sub", local "file1.txt" should map to "remote-sub/file1.txt"
+	scannerSub := NewScanner(mockFS, mockStorage, "remote-sub", false)
 	filesSub, err := scannerSub.ScanLocal("/tmp")
 	if err != nil {
 		t.Fatalf("ScanLocal failed: %v", err)
 	}
-	if len(filesSub) != 1 {
-		t.Errorf("Expected 1 file in subdir, got %d", len(filesSub))
+	if len(filesSub) != 2 {
+		t.Errorf("Expected 2 files, got %d", len(filesSub))
 	}
-	if _, ok := filesSub["subdir/file2.txt"]; !ok {
-		t.Error("subdir/file2.txt missing")
+	if _, ok := filesSub["remote-sub/file1.txt"]; !ok {
+		t.Error("remote-sub/file1.txt missing")
+	}
+	if _, ok := filesSub["remote-sub/subdir/file2.txt"]; !ok {
+		t.Error("remote-sub/subdir/file2.txt missing")
 	}
 }
 
