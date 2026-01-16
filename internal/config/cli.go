@@ -27,36 +27,41 @@ type CLIConfig struct {
 // ParseCLI parses command line arguments and environment variables.
 func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 	if len(os.Args) < 2 {
-		return nil, fmt.Errorf("usage: tgblobsync <command> [flags]\nCommands: push, pull, list")
+		return nil, fmt.Errorf("usage: tgblobsync <command> [flags] [args]\nRun 'tgblobsync <command> --help' for more information")
 	}
 
 	cmd := os.Args[1]
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 
 	cfg := &CLIConfig{Command: cmd}
 
-	fs.StringVar(&cfg.GroupName, "group", "", "Name of the Supergroup")
-	fs.StringVar(&cfg.TopicName, "topic", "", "Name of the Topic")
-	fs.StringVar(&cfg.SubDir, "sub-dir", "", "Synchronize only a specific subdirectory within the topic")
 	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
 	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
 	fs.BoolVar(&cfg.NonInteractive, "non-interactive", false, "Disable interactive UI and progress bars")
 
-	// Parse flags first to separate them from positional arguments
-	// However, standard flag package expects flags before positional args.
-	// We'll handle positional args manually.
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", cmd)
+		switch cmd {
+		case "push":
+			fmt.Fprintf(os.Stderr, "  tgblobsync push [flags] <local-path> [<group>:<topic>[:subdir]]\n")
+		case "pull":
+			fmt.Fprintf(os.Stderr, "  tgblobsync pull [flags] [<group>:<topic>[:subdir]] <local-path>\n")
+		case "list":
+			fmt.Fprintf(os.Stderr, "  tgblobsync list [flags] [<group>:<topic>]\n")
+		}
+		fmt.Fprintf(os.Stderr, "\nFlags:\n")
+		fs.PrintDefaults()
+	}
 
-	args := os.Args[2:]
-
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(os.Args[2:]); err != nil {
 		return nil, err
 	}
 
 	remaining := fs.Args()
 
 	switch cmd {
-case "push":
+	case "push":
 		if len(remaining) > 0 {
 			cfg.DirPath = remaining[0]
 		}
@@ -65,14 +70,16 @@ case "push":
 		}
 	case "pull":
 		if len(remaining) > 0 {
-			// Check if first arg is target or local path
-			// In pull, it's [<target>] <local-path>
 			if len(remaining) == 1 {
 				cfg.DirPath = remaining[0]
 			} else {
 				parseTarget(remaining[0], cfg)
 				cfg.DirPath = remaining[1]
 			}
+		}
+	case "list":
+		if len(remaining) > 0 {
+			parseTarget(remaining[0], cfg)
 		}
 	}
 

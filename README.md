@@ -41,40 +41,43 @@ On the first run, the tool will ask for your phone number and the authentication
 
 #### Push (Local to Telegram)
 
-Uploads files from a local directory to a Telegram Topic interactively.
+Syncs files and directories from a local path to a Telegram Topic.
 
 ```bash
-tgblobsync push --dir ./my-files
+tgblobsync push [flags] <local-path> [<group>:<topic>[:subdir]]
 ```
+
+Example: `tgblobsync push ./my-files "My Supergroup:My Topic"`
 
 #### Pull (Telegram to Local)
 
-Downloads files from a Telegram Topic to a local directory interactively.
+Syncs files and directories from a Telegram Topic to a local path.
 
 ```bash
-tgblobsync pull --dir ./restore-folder
+tgblobsync pull [flags] [<group>:<topic>[:subdir]] <local-path>
 ```
+
+Example: `tgblobsync pull "My Supergroup:My Topic:subdir" ./restore-folder`
 
 #### List (Interactive Browser)
 
 Explores the virtual directory structure within a Telegram Topic.
 
 ```bash
-tgblobsync list [ --group-id <ID> [ --topic-id <ID> ] ]
+tgblobsync list [flags] [<group>:<topic>]
 ```
 
 ### Options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--dir` | Path to the directory to sync (Required for push/pull) | - |
-| `--sub-dir` | Synchronize only a specific subdirectory within the topic | - |
-| `--group-id` | ID of the Supergroup | Interactive selection |
-| `--topic-id` | ID of the Topic (TopID) | Interactive selection |
 | `--workers` | Number of concurrent files to process | 1 |
 | `--upload-threads` | Number of parallel threads for a single file upload | 8 |
 | `--skip-md5` | Use modification time and size instead of MD5 checksums | false |
 | `--non-interactive` | Disable interactive UI and progress bars | false |
+
+> **Note**: For group or topic names containing spaces, wrap them in quotes (e.g., `"My Group:My Topic"`).
+
 
 ## How it works
 

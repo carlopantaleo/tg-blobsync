@@ -26,7 +26,76 @@ func TestParseCLI(t *testing.T) {
 		defAppHash  string
 		expectedCmd string
 		wantErr     bool
+		validate    func(*testing.T, *CLIConfig)
 	}{
+		{
+			name:        "Push with only local path",
+			args:        []string{"tgblobsync", "push", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "push",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if cfg.DirPath != "/tmp/data" {
+					t.Errorf("expected DirPath /tmp/data, got %s", cfg.DirPath)
+				}
+			},
+		},
+		{
+			name:        "Push with skip-md5",
+			args:        []string{"tgblobsync", "push", "--skip-md5", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "push",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if !cfg.SkipMD5 {
+					t.Error("expected SkipMD5 true")
+				}
+			},
+		},
+		{
+			name:        "Pull with only local path",
+			args:        []string{"tgblobsync", "pull", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "pull",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if cfg.DirPath != "/tmp/data" {
+					t.Errorf("expected DirPath /tmp/data, got %s", cfg.DirPath)
+				}
+			},
+		},
+		{
+			name:        "Pull with skip-md5",
+			args:        []string{"tgblobsync", "pull", "--skip-md5", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "pull",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if !cfg.SkipMD5 {
+					t.Error("expected SkipMD5 true")
+				}
+			},
+		},
+		{
+			name:        "Pull with target and local path",
+			args:        []string{"tgblobsync", "pull", "MyGroup:MyTopic:sub/dir", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "pull",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if cfg.GroupName != "MyGroup" || cfg.TopicName != "MyTopic" || cfg.SubDir != "sub/dir" {
+					t.Errorf("invalid target parsing: %s:%s:%s", cfg.GroupName, cfg.TopicName, cfg.SubDir)
+				}
+				if cfg.DirPath != "/tmp/data" {
+					t.Errorf("expected DirPath /tmp/data, got %s", cfg.DirPath)
+				}
+			},
+		},
 		{
 			name:        "Valid Push Command",
 			args:        []string{"tgblobsync", "push", "/tmp/data", "MyGroup:MyTopic"},
@@ -42,6 +111,19 @@ func TestParseCLI(t *testing.T) {
 			envAppHash:  "abcdef",
 			expectedCmd: "pull",
 			wantErr:     false,
+		},
+		{
+			name:        "Push with spaces in target",
+			args:        []string{"tgblobsync", "push", "/tmp/data", "My Group:My Topic:remote/path"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "push",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if cfg.GroupName != "My Group" || cfg.TopicName != "My Topic" || cfg.SubDir != "remote/path" {
+					t.Errorf("invalid target parsing with spaces: %s:%s:%s", cfg.GroupName, cfg.TopicName, cfg.SubDir)
+				}
+			},
 		},
 		{
 			name:        "Missing Dir for Push",
@@ -103,6 +185,9 @@ func TestParseCLI(t *testing.T) {
 			if !tt.wantErr && cfg != nil {
 				if cfg.Command != tt.expectedCmd {
 					t.Errorf("ParseCLI() command = %v, want %v", cfg.Command, tt.expectedCmd)
+				}
+				if tt.validate != nil {
+					tt.validate(t, cfg)
 				}
 				// Verify other fields if needed, e.g. AppID
 				expectedID := tt.envAppID
