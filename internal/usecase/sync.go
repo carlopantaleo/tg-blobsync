@@ -66,6 +66,7 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
+	executor.SetSubDir(s.subDir)
 	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
 }
 
@@ -101,6 +102,7 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
+	executor.SetSubDir(s.subDir)
 	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
 }
 

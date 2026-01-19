@@ -89,6 +89,15 @@ func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID 
 }
 
 func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+	if m.Files[groupID] == nil {
+		m.Files[groupID] = make(map[int64][]domain.RemoteFile)
+	}
+	m.Files[groupID][topicID] = append(m.Files[groupID][topicID], domain.RemoteFile{
+		Meta: domain.FileMeta{
+			Path: file.Path,
+		},
+		Size: file.Size,
+	})
 	return nil
 }
 

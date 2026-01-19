@@ -89,4 +89,52 @@ func TestExecutor_Execute(t *testing.T) {
 		t.Errorf("Execute(Cancel) failed: %v", err)
 	}
 	// Should log "cancelled" and return nil
+
+	// 5. Test Upload with SubDir
+	mockUI.Confirmed = true
+	executor.SetSubDir("remote-subdir")
+	if err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
+		t.Errorf("Execute(Upload with SubDir) failed: %v", err)
+	}
+
+	// Verify that the file was uploaded with the correct remote path
+	remoteFiles := mockStorage.Files[groupID][topicID]
+	found := false
+	expectedRemotePath := "remote-subdir/test.txt"
+	for _, f := range remoteFiles {
+		if f.Meta.Path == expectedRemotePath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected file to be uploaded to %s, but not found in mock storage", expectedRemotePath)
+	}
+
+	// 6. Test Download with SubDir
+	// remotePath is what's on Telegram, path is what the syncer/differ uses (relative)
+	remoteFileSubDir := domain.RemoteFile{
+		Meta:      domain.FileMeta{Path: "remote-subdir/file_in_sub.txt"},
+		Size:      100,
+		MessageID: 2,
+	}
+	planDownloadSubDir := domain.SyncPlan{
+		Items: []domain.SyncItem{
+			{
+				Path:       "file_in_sub.txt", // relative path after mapping
+				Action:     domain.ActionDownload,
+				RemoteFile: &remoteFileSubDir,
+			},
+		},
+		Summary: domain.SyncSummary{Total: 1, ToDownload: 1},
+	}
+
+	if err := executor.Execute(ctx, planDownloadSubDir, rootDir, groupID, topicID); err != nil {
+		t.Errorf("Execute(Download with SubDir) failed: %v", err)
+	}
+
+	expectedLocalPath := filepath.Join(rootDir, "file_in_sub.txt")
+	if _, ok := mockFS.Data[expectedLocalPath]; !ok {
+		t.Errorf("Expected file to be written locally at %s", expectedLocalPath)
+	}
 }

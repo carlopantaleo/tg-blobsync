@@ -15,6 +15,7 @@ import (
 
 type SyncExecutor interface {
 	Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error
+	SetSubDir(subDir string)
 }
 
 type executor struct {
@@ -22,6 +23,7 @@ type executor struct {
 	storage domain.BlobStorage
 	workers int
 	ui      domain.UserInterface
+	subDir  string
 }
 
 func NewExecutor(fs domain.FileSystem, storage domain.BlobStorage, workers int, ui domain.UserInterface) SyncExecutor {
@@ -34,6 +36,10 @@ func NewExecutor(fs domain.FileSystem, storage domain.BlobStorage, workers int, 
 		workers: workers,
 		ui:      ui,
 	}
+}
+
+func (e *executor) SetSubDir(subDir string) {
+	e.subDir = subDir
 }
 
 func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error {
@@ -122,7 +128,15 @@ func (e *executor) upload(ctx context.Context, item domain.SyncItem, groupID, to
 		return fmt.Errorf("local file is nil for upload: %s", item.Path)
 	}
 
-	err := e.storage.UploadFile(ctx, groupID, topicID, *item.LocalFile)
+	// Prepare local file for upload with corrected remote path
+	uploadFile := *item.LocalFile
+	if e.subDir != "" {
+		uploadFile.Path = filepath.ToSlash(filepath.Join(e.subDir, item.Path))
+	} else {
+		uploadFile.Path = item.Path
+	}
+
+	err := e.storage.UploadFile(ctx, groupID, topicID, uploadFile)
 	if err != nil {
 		return fmt.Errorf("error uploading file %s: %w", item.Path, err)
 	}
