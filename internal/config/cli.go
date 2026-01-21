@@ -110,6 +110,10 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 	}
 
 	// Command specific validation
+	if cmd == "sessions" {
+		return cfg, nil
+	}
+
 	if (cmd == "push" || cmd == "pull") && cfg.DirPath == "" {
 		return nil, fmt.Errorf("local path is required for push/pull commands")
 	}

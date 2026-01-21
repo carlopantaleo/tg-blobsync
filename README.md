@@ -5,7 +5,6 @@ TG-BlobSync is a conceptual tool to demonstrate the feasibility of using Telegra
 Please bear in mind that Telegram is not intended to be used as a blob storage and I strongly recommend against using it for production purposes.
 
 ## Features
-
 - **Bidirectional Sync**: Supports `push` (local to Telegram) and `pull` (Telegram to local) operations.
 - **Interactive Browser**: Navigate and explore virtual directories and files in a topic using the `list` command.
 - **Efficient Synchronization**: Compare files using MD5 checksums or modification time (`--skip-md5`).
@@ -15,6 +14,8 @@ Please bear in mind that Telegram is not intended to be used as a blob storage a
 - **Metadata Preservation**: Stores and restores original file modification times and paths.
 - **Non-Interactive Mode**: Fully scriptable with the `--non-interactive` flag.
 - **Nice UI**: Interactive progress bars and selection menus using `mpb` and `promptui`.
+- **Multi-Session Management**: Manage multiple Telegram accounts and sessions using the `sessions` command.
+
 
 ## Installation
 
@@ -35,7 +36,22 @@ Alternatively, you can set `APP_ID` and `APP_HASH` as environment variables.
 
 ### Authentication
 
-On the first run, the tool will ask for your phone number and the authentication code sent via Telegram. A session file will be stored locally (typically in `~/.tg_blobsync/session.json`) for future use.
+On the first run, the tool will ask for your phone number and the authentication code sent via Telegram. 
+
+### Session Management
+
+TG-BlobSync supports multiple authentication profiles. You can manage them using the `sessions` command:
+
+```bash
+tgblobsync sessions
+```
+
+This interactive command allows you to:
+- **Create New Session**: Perform a new login and add a profile.
+- **Select Active Session**: Choose which profile to use for subsequent commands.
+- **Delete Session**: Remove an existing profile.
+
+Session files are stored locally in `~/.tg_blobsync/session_<id>.json`.
 
 ### Commands
 

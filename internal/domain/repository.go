@@ -12,17 +12,7 @@ type ProgressTracker interface {
 	Wait()
 }
 
-// SyncConfirmer defines the interface for confirming synchronization plans.
-type SyncConfirmer interface {
-	ConfirmSync(plan SyncPlan) (bool, error)
-}
-
-// UserInterface combines progress tracking and confirmation.
-type UserInterface interface {
-	ProgressTracker
-	SyncConfirmer
-}
-
+// ProgressTask defines the interface for tracking file transfer progress tasks.
 type ProgressTask interface {
 	Increment(n int)
 	SetCurrent(current int64)
@@ -30,9 +20,53 @@ type ProgressTask interface {
 	Abort()
 }
 
+// AuthInput defines an interface for interactive authentication input.
+type AuthInput interface {
+	GetPhoneNumber() (string, error)
+	GetCode() (string, error)
+	GetPassword() (string, error)
+}
+
+// SyncConfirmer defines the interface for confirming synchronization plans.
+type SyncConfirmer interface {
+	ConfirmSync(plan SyncPlan) (bool, error)
+}
+
+// SessionInfo represents an authentication session.
+type SessionInfo struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	IsActive bool   `json:"is_active"`
+}
+
+// SessionManager defines the interface for managing multiple authentication sessions.
+type SessionManager interface {
+	ListSessions() ([]SessionInfo, error)
+	AddSession(ctx context.Context) (SessionInfo, error)
+	SelectSession(id string) error
+	DeleteSession(id string) error
+	GetActiveSession() (*SessionInfo, error)
+}
+
+// UserInterface combines progress tracking, confirmation and session management interaction.
+type UserInterface interface {
+	ProgressTracker
+	SyncConfirmer
+	AuthInput
+	SessionSelector
+}
+
+type SessionSelector interface {
+	SelectSession(sessions []SessionInfo) (string, error)
+	ConfirmDeleteSession(session SessionInfo) (bool, error)
+	ShowSessions(sessions []SessionInfo)
+	SelectSessionAction() (string, error)
+}
+
 // BlobStorage defines the interface for interacting with the remote storage (Telegram).
 type BlobStorage interface {
 	// Auth & Selection
+	Start(ctx context.Context) error
 	ListGroups(ctx context.Context) ([]Group, error)
 	ListTopics(ctx context.Context, groupID int64) ([]Topic, error)
 

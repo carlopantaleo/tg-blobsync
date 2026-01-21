@@ -69,6 +69,10 @@ func NewMockBlobStorage() *MockBlobStorage {
 	}
 }
 
+func (m *MockBlobStorage) Start(ctx context.Context) error {
+	return nil
+}
+
 func (m *MockBlobStorage) ListGroups(ctx context.Context) ([]domain.Group, error) {
 	return m.Groups, nil
 }
@@ -126,6 +130,19 @@ func (m *MockUserInterface) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 func (m *MockUserInterface) SetTotalFiles(total int)                            {}
 func (m *MockUserInterface) Start(name string, total int64) domain.ProgressTask { return &MockTask{} }
 func (m *MockUserInterface) Wait()                                              {}
+
+func (m *MockUserInterface) GetPhoneNumber() (string, error) { return "", nil }
+func (m *MockUserInterface) GetCode() (string, error)        { return "", nil }
+func (m *MockUserInterface) GetPassword() (string, error)    { return "", nil }
+
+func (m *MockUserInterface) SelectSession(sessions []domain.SessionInfo) (string, error) {
+	return "", nil
+}
+func (m *MockUserInterface) ConfirmDeleteSession(session domain.SessionInfo) (bool, error) {
+	return true, nil
+}
+func (m *MockUserInterface) ShowSessions(sessions []domain.SessionInfo) {}
+func (m *MockUserInterface) SelectSessionAction() (string, error)       { return "exit", nil }
 
 type MockTask struct{}
 

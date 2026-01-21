@@ -250,7 +250,89 @@ func formatSize(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// GetPhoneNumber prompts the user for their phone number.
+func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error) {
+	if len(sessions) == 0 {
+		return "", errors.New("no sessions available")
+	}
+
+	var items []string
+	for _, s := range sessions {
+		active := ""
+		if s.IsActive {
+			active = " (Active)"
+		}
+		items = append(items, fmt.Sprintf("%s%s", s.ID, active))
+	}
+
+	prompt := promptui.Select{
+		Label: "Select Session",
+		Items: items,
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+
+	return sessions[idx].ID, nil
+}
+
+func (u *ConsoleUI) ConfirmDeleteSession(session domain.SessionInfo) (bool, error) {
+	prompt := promptui.Prompt{
+		Label:     fmt.Sprintf("Delete session %s", session.ID),
+		IsConfirm: true,
+	}
+
+	_, err := prompt.Run()
+	if err != nil {
+		if err == promptui.ErrAbort {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (u *ConsoleUI) ShowSessions(sessions []domain.SessionInfo) {
+	fmt.Println("\n--- Available Sessions ---")
+	if len(sessions) == 0 {
+		fmt.Println("No sessions found.")
+	} else {
+		for _, s := range sessions {
+			active := ""
+			if s.IsActive {
+				active = " [ACTIVE]"
+			}
+			fmt.Printf("- %s%s\n", s.ID, active)
+		}
+	}
+	fmt.Println("--------------------------")
+}
+
+func (u *ConsoleUI) SelectSessionAction() (string, error) {
+	prompt := promptui.Select{
+		Label: "Choose Action",
+		Items: []string{"Create New Session", "Select Active Session", "Delete Session", "Exit"},
+	}
+
+	idx, _, err := prompt.Run()
+	if err != nil {
+		return "", err
+	}
+
+	switch idx {
+	case 0:
+		return "create", nil
+	case 1:
+		return "select", nil
+	case 2:
+		return "delete", nil
+	default:
+		return "exit", nil
+	}
+}
+
 func (u *ConsoleUI) GetPhoneNumber() (string, error) {
 	prompt := promptui.Prompt{
 		Label: "Enter Phone Number (international format, e.g. +39...)",

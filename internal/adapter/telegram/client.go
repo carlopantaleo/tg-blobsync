@@ -8,13 +8,11 @@ import (
 	"path/filepath"
 	"sync"
 	"tg-blobsync/internal/domain"
-
 	"time"
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
@@ -50,7 +48,7 @@ type AuthInput interface {
 	GetPassword() (string, error)
 }
 
-func NewTelegramClient(appID int, appHash string, sessionFile string, input AuthInput) (*TelegramClient, error) {
+func NewTelegramClient(appID int, appHash string, sessionFile string) (*TelegramClient, error) {
 	// Ensure session directory exists
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create session dir: %w", err)
@@ -86,7 +84,7 @@ func (t *TelegramClient) SetUploadThreads(threads int) {
 }
 
 // Start connects and authenticates the client.
-func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
+func (t *TelegramClient) Start(ctx context.Context) error {
 	t.ctx = ctx
 
 	// We use a channel to signal when authentication is done and we are ready
@@ -102,15 +100,7 @@ func (t *TelegramClient) Start(ctx context.Context, input AuthInput) error {
 			}
 
 			if !status.Authorized {
-				log.Println("[Telegram] Not authorized, starting auth flow...")
-				flow := auth.NewFlow(
-					termAuth{input: input},
-					auth.SendCodeOptions{},
-				)
-				if err := t.tgClient.Auth().IfNecessary(ctx, flow); err != nil {
-					return fmt.Errorf("auth flow failed: %w", err)
-				}
-				log.Println("[Telegram] Authorization successful")
+				return fmt.Errorf("client not authorized")
 			}
 
 			// Initialize helpers

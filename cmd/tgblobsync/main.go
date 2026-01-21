@@ -42,15 +42,38 @@ func run() error {
 
 	console := ui.NewConsoleUI(cfg.NonInteractive)
 
-	log.Printf("Session file: %s", cfg.SessionPath)
+	sessionDir := filepath.Dir(cfg.SessionPath)
+	sessionRepo := telegram.NewSessionManager(cfg.AppID, cfg.AppHash, sessionDir, console)
 
-	tgClient, err := telegram.NewTelegramClient(cfg.AppID, cfg.AppHash, cfg.SessionPath, console)
+	if cfg.Command == "sessions" {
+		manager := usecase.NewSessionManager(sessionRepo, console)
+		return manager.Manage(ctx)
+	}
+
+	active, err := sessionRepo.GetActiveSession()
+	if err != nil {
+		return fmt.Errorf("failed to check active session: %w", err)
+	}
+
+	if active == nil {
+		log.Println("No active session found. Please login.")
+		activeInfo, err := sessionRepo.AddSession(ctx)
+		if err != nil {
+			return fmt.Errorf("login failed: %w", err)
+		}
+		active = &activeInfo
+	}
+
+	sessionFile := filepath.Join(sessionDir, "session_"+active.ID+".json")
+	log.Printf("Using session: %s", active.ID)
+
+	tgClient, err := telegram.NewTelegramClient(cfg.AppID, cfg.AppHash, sessionFile)
 	if err != nil {
 		return fmt.Errorf("failed to create telegram client: %w", err)
 	}
 
 	log.Println("Connecting to Telegram...")
-	if err := tgClient.Start(ctx, console); err != nil {
+	if err := tgClient.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start telegram client: %w", err)
 	}
 	defer tgClient.Close()
