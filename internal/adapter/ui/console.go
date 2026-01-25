@@ -3,6 +3,9 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -11,9 +14,12 @@ import (
 	"tg-blobsync/internal/domain"
 	"time"
 
-	"github.com/manifoldco/promptui"
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ConsoleUI handles user interactions via the terminal.
@@ -24,16 +30,46 @@ type ConsoleUI struct {
 	startedFiles   int
 	completedFiles int
 	mu             sync.Mutex
+
+	tuiProgram        *tea.Program
+	tuiModel          *model
+	originalLogOutput io.Writer
 }
 
 func NewConsoleUI(nonInteractive bool) *ConsoleUI {
-	var p *mpb.Progress
-	if !nonInteractive {
-		p = mpb.New(mpb.WithWidth(64))
+	ui := &ConsoleUI{
+		nonInteractive:    nonInteractive,
+		originalLogOutput: log.Writer(),
 	}
-	return &ConsoleUI{
-		progress:       p,
-		nonInteractive: nonInteractive,
+
+	if !nonInteractive {
+		m := initialModel()
+		ui.tuiModel = &m
+		ui.tuiProgram = tea.NewProgram(m, tea.WithAltScreen())
+
+		// Start Bubble Tea in a goroutine
+		go func() {
+			if _, err := ui.tuiProgram.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+			}
+		}()
+
+		// Redirect log output to TUI
+		log.SetOutput(&TUIWriter{program: ui.tuiProgram})
+
+		ui.progress = mpb.New(
+			mpb.WithOutput(&TUIWriter{program: ui.tuiProgram}), // This might need careful handling
+			mpb.WithWidth(64),
+		)
+	}
+
+	return ui
+}
+
+func (u *ConsoleUI) Close() {
+	if u.tuiProgram != nil {
+		u.tuiProgram.Quit()
+		log.SetOutput(u.originalLogOutput)
 	}
 }
 
@@ -103,41 +139,43 @@ func (u *ConsoleUI) Wait() {
 	u.progress = mpb.New(mpb.WithWidth(64))
 }
 
+// ConfirmSync prompts the user to confirm the sync plan.
 func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 	if u.nonInteractive {
 		return true, nil
 	}
 
 	for {
-		prompt := promptui.Select{
-			Label: "Action Required",
-			Items: []string{
-				"Start Transfer",
-				"Show Detailed Changes",
-				"Cancel/Exit",
-			},
+		items := []list.Item{
+			listItem{title: "Start Transfer", value: "start"},
+			listItem{title: "Show Detailed Changes", value: "details"},
+			listItem{title: "Cancel/Exit", value: "cancel"},
 		}
 
-		idx, _, err := prompt.Run()
-		if err != nil {
-			return false, err
-		}
+		l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+		l.Title = "Action Required"
 
-		switch idx {
-		case 0: // Start Transfer
-			return true, nil
-		case 1: // Show Detailed Changes
-			u.showDetailedChanges(plan)
-		case 2: // Cancel/Exit
-			return false, nil
+		u.tuiProgram.Send(showListMsg{list: l})
+
+		res := <-u.tuiModel.responseChan
+		if item, ok := res.(listItem); ok {
+			switch item.value.(string) {
+			case "start":
+				return true, nil
+			case "details":
+				u.showDetailedChanges(plan)
+			case "cancel":
+				return false, nil
+			}
+		} else {
+			return false, errors.New("selection cancelled")
 		}
 	}
 }
 
 func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
-	fmt.Println("\n--- Detailed Changes ---")
-
-	fmt.Println("\nActions:")
+	var sb strings.Builder
+	sb.WriteString("--- Detailed Changes ---\n\nActions:\n")
 	for _, item := range plan.Items {
 		symbol := "?"
 		actionName := ""
@@ -175,9 +213,17 @@ func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
 			reasonStr = fmt.Sprintf(" (%s)", item.Reason)
 		}
 
-		fmt.Printf("  %s %-40s %-20s %s\n", symbol, item.Path, actionName, reasonStr)
+		sb.WriteString(fmt.Sprintf("  %s %-40s %-20s %s\n", symbol, item.Path, actionName, reasonStr))
 	}
-	fmt.Println("------------------------")
+	sb.WriteString("------------------------\n")
+
+	if u.nonInteractive {
+		fmt.Print(sb.String())
+		return
+	}
+
+	u.tuiProgram.Send(updateContentMsg(sb.String()))
+	u.Prompt("Press Enter to continue")
 }
 
 type mpbTask struct {
@@ -250,123 +296,170 @@ func formatSize(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// SelectSession prompts the user to select a session from the list.
 func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error) {
 	if len(sessions) == 0 {
 		return "", errors.New("no sessions available")
 	}
 
-	var items []string
+	if u.nonInteractive {
+		return "", errors.New("cannot select session in non-interactive mode")
+	}
+
+	var items []list.Item
 	for _, s := range sessions {
 		active := ""
 		if s.IsActive {
 			active = " (Active)"
 		}
-		items = append(items, fmt.Sprintf("%s%s", s.ID, active))
+		items = append(items, listItem{
+			title: fmt.Sprintf("%s%s", s.ID, active),
+			value: s.ID,
+		})
 	}
 
-	prompt := promptui.Select{
-		Label: "Select Session",
-		Items: items,
+	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Select Session"
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if item, ok := res.(listItem); ok {
+		return item.value.(string), nil
 	}
 
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-
-	return sessions[idx].ID, nil
+	return "", errors.New("selection cancelled")
 }
 
+// ConfirmDeleteSession prompts the user to confirm session deletion.
 func (u *ConsoleUI) ConfirmDeleteSession(session domain.SessionInfo) (bool, error) {
-	prompt := promptui.Prompt{
-		Label:     fmt.Sprintf("Delete session %s", session.ID),
-		IsConfirm: true,
+	if u.nonInteractive {
+		return false, nil
 	}
 
-	_, err := prompt.Run()
-	if err != nil {
-		if err == promptui.ErrAbort {
-			return false, nil
-		}
-		return false, err
+	items := []list.Item{
+		listItem{title: "Yes, Delete", value: true},
+		listItem{title: "No, Keep", value: false},
 	}
 
-	return true, nil
+	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l.Title = fmt.Sprintf("Delete session %s?", session.ID)
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if item, ok := res.(listItem); ok {
+		return item.value.(bool), nil
+	}
+
+	return false, nil
 }
 
+// ShowSessions displays available sessions in the interactive area.
 func (u *ConsoleUI) ShowSessions(sessions []domain.SessionInfo) {
-	fmt.Println("\n--- Available Sessions ---")
+	var sb strings.Builder
+	sb.WriteString("--- Available Sessions ---\n")
 	if len(sessions) == 0 {
-		fmt.Println("No sessions found.")
+		sb.WriteString("No sessions found.\n")
 	} else {
 		for _, s := range sessions {
 			active := ""
 			if s.IsActive {
 				active = " [ACTIVE]"
 			}
-			fmt.Printf("- %s%s\n", s.ID, active)
+			sb.WriteString(fmt.Sprintf("- %s%s\n", s.ID, active))
 		}
 	}
-	fmt.Println("--------------------------")
+	sb.WriteString("--------------------------\n")
+	u.tuiProgram.Send(updateContentMsg(sb.String()))
 }
 
+// SelectSessionAction prompts the user for a session action.
 func (u *ConsoleUI) SelectSessionAction() (string, error) {
-	prompt := promptui.Select{
-		Label: "Choose Action",
-		Items: []string{"Create New Session", "Select Active Session", "Delete Session", "Exit"},
-	}
-
-	idx, _, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-
-	switch idx {
-	case 0:
-		return "create", nil
-	case 1:
-		return "select", nil
-	case 2:
-		return "delete", nil
-	default:
+	if u.nonInteractive {
 		return "exit", nil
 	}
+
+	items := []list.Item{
+		listItem{title: "Create New Session", value: "create"},
+		listItem{title: "Select Active Session", value: "select"},
+		listItem{title: "Delete Session", value: "delete"},
+		listItem{title: "Exit", value: "exit"},
+	}
+
+	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Choose Action"
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if item, ok := res.(listItem); ok {
+		return item.value.(string), nil
+	}
+
+	return "exit", nil
 }
 
+// GetPhoneNumber prompts the user for the phone number.
 func (u *ConsoleUI) GetPhoneNumber() (string, error) {
-	prompt := promptui.Prompt{
-		Label: "Enter Phone Number (international format, e.g. +39...)",
-		Validate: func(input string) error {
-			if len(input) < 5 {
-				return errors.New("phone number too short")
-			}
-			return nil
-		},
+	if u.nonInteractive {
+		return "", errors.New("cannot prompt for phone number in non-interactive mode")
 	}
-	return prompt.Run()
+
+	ti := textinput.New()
+	ti.Placeholder = "+39..."
+	ti.Focus()
+
+	u.tuiModel.promptLabel = "Enter Phone Number (international format, e.g. +39...)"
+	u.tuiProgram.Send(showPromptMsg{input: ti})
+
+	res := <-u.tuiModel.responseChan
+	if s, ok := res.(string); ok {
+		return s, nil
+	}
+	return "", errors.New("prompt cancelled")
 }
 
 // GetCode prompts the user for the authentication code.
 func (u *ConsoleUI) GetCode() (string, error) {
-	prompt := promptui.Prompt{
-		Label: "Enter Code",
-		Validate: func(input string) error {
-			if len(input) == 0 {
-				return errors.New("code cannot be empty")
-			}
-			return nil
-		},
+	if u.nonInteractive {
+		return "", errors.New("cannot prompt for code in non-interactive mode")
 	}
-	return prompt.Run()
+
+	ti := textinput.New()
+	ti.Placeholder = "12345"
+	ti.Focus()
+
+	u.tuiModel.promptLabel = "Enter Code"
+	u.tuiProgram.Send(showPromptMsg{input: ti})
+
+	res := <-u.tuiModel.responseChan
+	if s, ok := res.(string); ok {
+		return s, nil
+	}
+	return "", errors.New("prompt cancelled")
 }
 
 // GetPassword prompts the user for their 2FA password.
 func (u *ConsoleUI) GetPassword() (string, error) {
-	prompt := promptui.Prompt{
-		Label: "Enter 2FA Password",
-		Mask:  '*',
+	if u.nonInteractive {
+		return "", errors.New("cannot prompt for password in non-interactive mode")
 	}
-	return prompt.Run()
+
+	ti := textinput.New()
+	ti.Placeholder = "Password"
+	ti.EchoMode = textinput.EchoPassword
+	ti.EchoCharacter = '•'
+	ti.Focus()
+
+	u.tuiModel.promptLabel = "Enter 2FA Password"
+	u.tuiProgram.Send(showPromptMsg{input: ti})
+
+	res := <-u.tuiModel.responseChan
+	if s, ok := res.(string); ok {
+		return s, nil
+	}
+	return "", errors.New("prompt cancelled")
 }
 
 // SelectGroup prompts the user to select a group from the list.
@@ -375,32 +468,30 @@ func (u *ConsoleUI) SelectGroup(groups []domain.Group) (domain.Group, error) {
 		return domain.Group{}, errors.New("no groups available")
 	}
 
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}?",
-		Active:   "\U0001F449 {{ .Title | cyan }}",
-		Inactive: "  {{ .Title | white }}",
-		Selected: "\U0001F44D {{ .Title | green | cyan }}",
+	if u.nonInteractive {
+		return domain.Group{}, errors.New("cannot select group in non-interactive mode")
 	}
 
-	prompt := promptui.Select{
-		Label:     "Select Group",
-		Items:     groups,
-		Templates: templates,
-		Size:      10,
-		Searcher: func(input string, index int) bool {
-			group := groups[index]
-			name := strings.Replace(strings.ToLower(group.Title), " ", "", -1)
-			input = strings.Replace(strings.ToLower(input), " ", "", -1)
-			return strings.Contains(name, input)
-		},
+	var items []list.Item
+	for _, g := range groups {
+		items = append(items, listItem{title: g.Title, value: g})
 	}
 
-	i, _, err := prompt.Run()
-	if err != nil {
-		return domain.Group{}, err
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
+	l.Title = "Select Group"
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if g, ok := res.(listItem); ok {
+		return g.value.(domain.Group), nil
 	}
 
-	return groups[i], nil
+	return domain.Group{}, errors.New("selection cancelled")
 }
 
 // SelectTopic prompts the user to select a topic from the list.
@@ -409,69 +500,72 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 		return domain.Topic{}, errors.New("no topics available")
 	}
 
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . }}?",
-		Active:   "\U0001F449 {{ .Title | cyan }}",
-		Inactive: "  {{ .Title | white }}",
-		Selected: "\U0001F44D {{ .Title | green | cyan }}",
+	if u.nonInteractive {
+		return domain.Topic{}, errors.New("cannot select topic in non-interactive mode")
 	}
 
-	prompt := promptui.Select{
-		Label:     "Select Topic",
-		Items:     topics,
-		Templates: templates,
-		Size:      10,
-		Searcher: func(input string, index int) bool {
-			topic := topics[index]
-			name := strings.Replace(strings.ToLower(topic.Title), " ", "", -1)
-			input = strings.Replace(strings.ToLower(input), " ", "", -1)
-			return strings.Contains(name, input)
-		},
+	var items []list.Item
+	items = append(items, listItem{title: ".. [Back to Groups]", value: "back"})
+	for _, t := range topics {
+		items = append(items, listItem{title: t.Title, value: t})
 	}
 
-	i, _, err := prompt.Run()
-	if err != nil {
-		return domain.Topic{}, err
-	}
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
+	l.Title = "Select Topic"
 
-	return topics[i], nil
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if item, ok := res.(listItem); ok {
+		if val, ok := item.value.(string); ok && val == "back" {
+			return domain.Topic{}, errors.New("back")
+		}
+		return item.value.(domain.Topic), nil
+	}
+	return domain.Topic{}, errors.New("selection cancelled")
 }
 
 // SelectSubDir prompts the user for a subdirectory path.
 func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
-	if len(existingSubDirs) == 0 {
-		return u.Prompt("Enter subdirectory path (optional, leave empty for root)")
+	if u.nonInteractive {
+		return "", nil
 	}
 
-	// Add an option to enter a custom path
-	items := []string{
-		"[ Root / No subdirectory ]",
-		"[ Enter custom path ]",
+	items := []list.Item{
+		listItem{title: ".. [Back to Topics]", value: "back"},
+		listItem{title: "[ Root / No subdirectory ]", value: ""},
+		listItem{title: "[ Enter custom path ]", value: "custom"},
 	}
 	for _, s := range existingSubDirs {
-		items = append(items, fmt.Sprintf("\U0001F4C1 %s", s))
+		items = append(items, listItem{title: s, value: s})
 	}
 
-	prompt := promptui.Select{
-		Label: "Select or enter subdirectory",
-		Items: items,
-		Size:  10,
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
+	l.Title = "Select or enter subdirectory"
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res := <-u.tuiModel.responseChan
+	if item, ok := res.(listItem); ok {
+		val, isStr := item.value.(string)
+		if isStr && val == "back" {
+			return "", errors.New("back")
+		}
+		if isStr && val == "custom" {
+			return u.Prompt("Enter custom subdirectory path")
+		}
+		return val, nil
 	}
 
-	idx, result, err := prompt.Run()
-	if err != nil {
-		return "", err
-	}
-
-	switch idx {
-	case 0:
-		return "", nil
-	case 1:
-		return u.Prompt("Enter custom subdirectory path")
-	default:
-		// Remove the icon from the result
-		return strings.TrimPrefix(result, "\U0001F4C1 "), nil
-	}
+	return "", errors.New("selection cancelled")
 }
 
 // AskToCreateTopic prompts to create a new topic if needed (Not in requirements but useful)
@@ -479,21 +573,25 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 
 // Helper to prompt for generic text
 func (u *ConsoleUI) Prompt(label string) (string, error) {
-	prompt := promptui.Prompt{
-		Label: label,
+	if u.nonInteractive {
+		return "", errors.New("cannot prompt in non-interactive mode")
 	}
-	return prompt.Run()
+
+	ti := textinput.New()
+	ti.Focus()
+
+	u.tuiModel.promptLabel = label
+	u.tuiProgram.Send(showPromptMsg{input: ti})
+
+	res := <-u.tuiModel.responseChan
+	if s, ok := res.(string); ok {
+		return s, nil
+	}
+	return "", errors.New("prompt cancelled")
 }
 
 func (u *ConsoleUI) PromptInt(label string) (int64, error) {
-	prompt := promptui.Prompt{
-		Label: label,
-		Validate: func(input string) error {
-			_, err := strconv.ParseInt(input, 10, 64)
-			return err
-		},
-	}
-	res, err := prompt.Run()
+	res, err := u.Prompt(label)
 	if err != nil {
 		return 0, err
 	}
@@ -503,7 +601,7 @@ func (u *ConsoleUI) PromptInt(label string) (int64, error) {
 // BrowseFiles allows interactive navigation of the virtual directory structure.
 func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 	if len(files) == 0 {
-		fmt.Println("No files to browse.")
+		u.tuiProgram.Send(updateContentMsg("No files to browse."))
 		return nil
 	}
 
@@ -520,26 +618,30 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 			displayDir = "/"
 		}
 
-		templates := &promptui.SelectTemplates{
-			Label:    fmt.Sprintf("Current directory: %s (%s)", displayDir, formatSize(currentDirTotalSize)),
-			Active:   "\U0001F449 {{ .Label | cyan }}",
-			Inactive: "  {{ .Label | white }}",
-			Selected: "{{ if .File }}\U0001F44D {{ .Label | green }}{{ else }}\U0001F44D {{ .Label | yellow }}{{ end }}",
+		var items []list.Item
+		for _, entry := range menu {
+			items = append(items, listItem{
+				title: entry.Label,
+				value: entry,
+			})
 		}
 
-		prompt := promptui.Select{
-			Label:     "Browse Files",
-			Items:     menu,
-			Templates: templates,
-			Size:      15,
+		d := list.NewDefaultDelegate()
+		d.ShowDescription = false
+		d.SetHeight(1)
+		d.SetSpacing(0)
+		l := list.New(items, d, 0, 0)
+		l.Title = fmt.Sprintf("Browse Files - %s (%s)", displayDir, formatSize(currentDirTotalSize))
+
+		u.tuiProgram.Send(showListMsg{list: l})
+
+		res := <-u.tuiModel.responseChan
+		selectedItem, ok := res.(listItem)
+		if !ok {
+			return errors.New("browsing cancelled")
 		}
 
-		idx, _, err := prompt.Run()
-		if err != nil {
-			return err
-		}
-
-		selected := menu[idx]
+		selected := selectedItem.value.(browserMenuEntry)
 		if selected.Label == "Exit Browser" {
 			return nil
 		}
@@ -652,22 +754,20 @@ func (u *ConsoleUI) buildBrowserItems(files []domain.RemoteFile, currentDir stri
 }
 
 func (u *ConsoleUI) showFileDetails(f *domain.RemoteFile) {
-	fmt.Printf("\n--- File Details ---\n")
-	fmt.Printf("Path:     %s\n", f.Meta.Path)
-	fmt.Printf("Size:     %s\n", formatSize(f.Size))
-	fmt.Printf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339))
+	var sb strings.Builder
+	sb.WriteString("\n--- File Details ---\n")
+	sb.WriteString(fmt.Sprintf("Path:     %s\n", f.Meta.Path))
+	sb.WriteString(fmt.Sprintf("Size:     %s\n", formatSize(f.Size)))
+	sb.WriteString(fmt.Sprintf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339)))
 	if f.Meta.Checksum != "" {
-		fmt.Printf("Checksum: %s\n", f.Meta.Checksum)
+		sb.WriteString(fmt.Sprintf("Checksum: %s\n", f.Meta.Checksum))
 	}
 	if f.Meta.Flags != "" {
-		fmt.Printf("Flags:    %s\n", f.Meta.Flags)
+		sb.WriteString(fmt.Sprintf("Flags:    %s\n", f.Meta.Flags))
 	}
-	fmt.Printf("MsgID:    %d\n", f.MessageID)
-	fmt.Printf("--------------------\n\n")
+	sb.WriteString(fmt.Sprintf("MsgID:    %d\n", f.MessageID))
+	sb.WriteString("--------------------\n\n")
 
-	promptContinue := promptui.Prompt{
-		Label:     "Press Enter to continue browsing",
-		IsConfirm: false,
-	}
-	promptContinue.Run()
+	u.tuiProgram.Send(updateContentMsg(sb.String()))
+	u.Prompt("Press Enter to continue browsing")
 }

@@ -41,6 +41,7 @@ func run() error {
 	defer cancel()
 
 	console := ui.NewConsoleUI(cfg.NonInteractive)
+	defer console.Close()
 
 	sessionDir := filepath.Dir(cfg.SessionPath)
 	sessionRepo := telegram.NewSessionManager(cfg.AppID, cfg.AppHash, sessionDir, console)
@@ -101,6 +102,20 @@ func run() error {
 }
 
 func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
+	for {
+		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+		if err != nil && err.Error() == "back" {
+			// Reset names to force re-selection if we were in a "back" flow
+			cfg.GroupName = ""
+			cfg.TopicName = ""
+			cfg.SubDir = ""
+			continue
+		}
+		return groupID, topicID, err
+	}
+}
+
+func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
 	var groupID int64
 	var topicID int64
 
@@ -137,59 +152,69 @@ func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *tel
 	}
 
 	// 2. Resolve Topic
-	if cfg.TopicName != "" {
-		// Try to parse as ID first
-		if id, err := strconv.ParseInt(cfg.TopicName, 10, 64); err == nil {
-			topicID = id
-		} else {
-			// Resolve by name
-			t, err := storage.FindTopicByName(ctx, groupID, cfg.TopicName)
-			if err != nil {
-				return 0, 0, err
-			}
-			topicID = t.ID
-		}
-	} else {
-		if cfg.NonInteractive {
-			return 0, 0, fmt.Errorf("topic name is required in non-interactive mode")
-		}
-		log.Println("Fetching topics...")
-		topics, err := storage.ListTopics(ctx, groupID)
-		if err != nil {
-			return 0, 0, fmt.Errorf("failed to list topics: %w", err)
-		}
-		selected, err := console.SelectTopic(topics)
-		if err != nil {
-			return 0, 0, err
-		}
-		topicID = selected.ID
-	}
-
-	// 3. SubDir selection (if not already specified)
-	if cfg.SubDir == "" && !cfg.NonInteractive && (cfg.Command == "push" || cfg.Command == "pull") {
-		// Fetch existing subdirs to help user
-		files, err := storage.ListFiles(ctx, groupID, topicID)
-		if err == nil {
-			subdirsMap := make(map[string]bool)
-			for _, f := range files {
-				path := filepath.ToSlash(f.Meta.Path)
-				parts := strings.Split(path, "/")
-				if len(parts) > 1 {
-					subdirsMap[parts[0]] = true
+	for {
+		if cfg.TopicName != "" {
+			// Try to parse as ID first
+			if id, err := strconv.ParseInt(cfg.TopicName, 10, 64); err == nil {
+				topicID = id
+			} else {
+				// Resolve by name
+				t, err := storage.FindTopicByName(ctx, groupID, cfg.TopicName)
+				if err != nil {
+					return 0, 0, err
 				}
+				topicID = t.ID
 			}
-			var existing []string
-			for s := range subdirsMap {
-				existing = append(existing, s)
+		} else {
+			if cfg.NonInteractive {
+				return 0, 0, fmt.Errorf("topic name is required in non-interactive mode")
 			}
-			sort.Strings(existing)
-
-			selectedSubDir, err := console.SelectSubDir(existing)
+			log.Println("Fetching topics...")
+			topics, err := storage.ListTopics(ctx, groupID)
 			if err != nil {
+				return 0, 0, fmt.Errorf("failed to list topics: %w", err)
+			}
+			selected, err := console.SelectTopic(topics)
+			if err != nil {
+				if err.Error() == "back" {
+					cfg.GroupName = "" // Reset group to force re-selection
+					return 0, 0, err
+				}
 				return 0, 0, err
 			}
-			cfg.SubDir = selectedSubDir
+			topicID = selected.ID
 		}
+
+		// 3. SubDir selection
+		if cfg.SubDir == "" && !cfg.NonInteractive && (cfg.Command == "push" || cfg.Command == "pull") {
+			files, err := storage.ListFiles(ctx, groupID, topicID)
+			if err == nil {
+				subdirsMap := make(map[string]bool)
+				for _, f := range files {
+					path := filepath.ToSlash(f.Meta.Path)
+					parts := strings.Split(path, "/")
+					if len(parts) > 1 {
+						subdirsMap[parts[0]] = true
+					}
+				}
+				var existing []string
+				for s := range subdirsMap {
+					existing = append(existing, s)
+				}
+				sort.Strings(existing)
+
+				selectedSubDir, err := console.SelectSubDir(existing)
+				if err != nil {
+					if err.Error() == "back" {
+						cfg.TopicName = "" // Reset topic to force re-selection
+						continue           // Go back to topic selection
+					}
+					return 0, 0, err
+				}
+				cfg.SubDir = selectedSubDir
+			}
+		}
+		break
 	}
 
 	return groupID, topicID, nil
