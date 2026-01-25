@@ -82,9 +82,9 @@ func TestConsoleUI_BuildBrowserItems(t *testing.T) {
 		t.Errorf("Total size mismatch: got %d, want 600", totalSize)
 	}
 
-	// Expected: root.txt, dir/, Exit Browser
-	if len(items) != 3 {
-		t.Errorf("Expected 3 items in root, got %d", len(items))
+	// Expected: [Back to Topics], root.txt, dir/, Exit Browser
+	if len(items) != 4 {
+		t.Errorf("Expected 4 items in root, got %d", len(items))
 	}
 
 	// Check content
@@ -108,9 +108,9 @@ func TestConsoleUI_BuildBrowserItems(t *testing.T) {
 		t.Fatalf("buildBrowserItems(dir) failed: %v", err)
 	}
 
-	// Expected: .. [Go Up], subdir/, file1.txt, Exit Browser
-	if len(items) != 4 {
-		t.Errorf("Expected 4 items in 'dir', got %d", len(items))
+	// Expected: [Back to Topics], .. [Go Up], subdir/, file1.txt, Exit Browser
+	if len(items) != 5 {
+		t.Errorf("Expected 5 items in 'dir', got %d", len(items))
 	}
 
 	foundUp := false

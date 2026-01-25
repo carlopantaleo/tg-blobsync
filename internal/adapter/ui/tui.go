@@ -83,10 +83,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.viewport.Width = m.width
 		m.viewport.Height = logHeight
-		m.viewport.SetContent(strings.Join(m.logs, "\n"))
+		m.viewport.SetContent(m.wrapLogs())
 		m.viewport.GotoBottom()
 
 	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			m.quitting = true
+			close(m.responseChan) // Signal blocking calls to stop
+			return m, tea.Quit
+		}
+
 		if m.showList {
 			if msg.String() == "enter" {
 				m.responseChan <- m.list.SelectedItem()
@@ -107,11 +114,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput, cmd = m.textInput.Update(msg)
 			return m, cmd
 		}
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-		}
 
 		if m.quitting {
 			return m, nil
@@ -119,13 +121,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logMsg:
 		m.logMu.Lock()
-		m.logs = append(m.logs, string(msg))
-		if len(m.logs) > 1000 { // Keep last 1000 logs
-			m.logs = m.logs[len(m.logs)-1000:]
+		cleanMsg := strings.TrimSpace(string(msg))
+		if cleanMsg != "" {
+			m.logs = append(m.logs, cleanMsg)
+			if len(m.logs) > 1000 { // Keep last 1000 logs
+				m.logs = m.logs[len(m.logs)-1000:]
+			}
+			m.viewport.SetContent(m.wrapLogs())
+			m.viewport.GotoBottom()
 		}
-		newContent := strings.Join(m.logs, "\n")
-		m.viewport.SetContent(newContent)
-		m.viewport.GotoBottom()
 		m.logMu.Unlock()
 
 	case updateContentMsg:
@@ -166,9 +170,10 @@ func (m model) View() string {
 	if m.showList {
 		upperContent = m.list.View()
 	} else if m.showPrompt {
-		upperContent = fmt.Sprintf("%s\n\n%s", m.promptLabel, m.textInput.View())
+		upperContent = fmt.Sprintf("%s\n\n%s\n\n%s", m.interactiveContent, m.promptLabel, m.textInput.View())
 	} else {
-		upperContent = m.interactiveContent
+		// Wrap interactive content too if it's plain text
+		upperContent = lipgloss.NewStyle().Width(m.width).Render(m.interactiveContent)
 	}
 
 	upperArea := lipgloss.NewStyle().
@@ -181,6 +186,19 @@ func (m model) View() string {
 		Render(m.viewport.View())
 
 	return lipgloss.JoinVertical(lipgloss.Left, upperArea, lowerArea)
+}
+
+func (m model) wrapLogs() string {
+	if m.width <= 0 {
+		return strings.Join(m.logs, "\n")
+	}
+	// Use lipgloss to wrap each log line
+	style := lipgloss.NewStyle().Width(m.width)
+	var wrapped []string
+	for _, l := range m.logs {
+		wrapped = append(wrapped, style.Render(l))
+	}
+	return strings.Join(wrapped, "\n")
 }
 
 type logMsg string
@@ -209,7 +227,13 @@ type TUIWriter struct {
 
 func (w *TUIWriter) Write(p []byte) (n int, err error) {
 	if w.program != nil {
-		w.program.Send(logMsg(string(p)))
+		lines := strings.Split(string(p), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				w.program.Send(logMsg(trimmed))
+			}
+		}
 	}
 	return len(p), nil
 }

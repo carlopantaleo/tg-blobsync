@@ -143,6 +143,7 @@ func (m *MockUserInterface) ConfirmDeleteSession(session domain.SessionInfo) (bo
 }
 func (m *MockUserInterface) ShowSessions(sessions []domain.SessionInfo) {}
 func (m *MockUserInterface) SelectSessionAction() (string, error)       { return "exit", nil }
+func (m *MockUserInterface) WaitForInput(message string) error          { return nil }
 
 type MockTask struct{}
 
@@ -156,7 +157,7 @@ type MockBrowseUI struct {
 	Files []domain.RemoteFile
 }
 
-func (m *MockBrowseUI) BrowseFiles(files []domain.RemoteFile) error {
+func (m *MockBrowseUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) {
 	m.Files = files
-	return nil
+	return nil, nil
 }

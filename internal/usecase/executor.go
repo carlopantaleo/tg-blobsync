@@ -44,7 +44,11 @@ func (e *executor) SetSubDir(subDir string) {
 
 func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error {
 	if plan.Summary.Total == 0 {
-		log.Println("Everything is up to date.")
+		msg := "Everything is up to date."
+		log.Println(msg)
+		if e.ui != nil {
+			_ = e.ui.WaitForInput(msg)
+		}
 		return nil
 	}
 
@@ -97,6 +101,7 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 
 	if e.ui != nil {
 		e.ui.Wait()
+		_ = e.ui.WaitForInput("Sync completed.")
 	}
 
 	// Execute Deletions

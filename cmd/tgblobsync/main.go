@@ -14,6 +14,7 @@ import (
 	"tg-blobsync/internal/adapter/telegram"
 	"tg-blobsync/internal/adapter/ui"
 	"tg-blobsync/internal/config"
+	"tg-blobsync/internal/domain"
 	"tg-blobsync/internal/usecase"
 )
 
@@ -84,6 +85,7 @@ func run() error {
 	tgClient.SetUploadThreads(cfg.UploadThreads)
 	tgClient.SetProgressTracker(console)
 
+restart_identifiers:
 	groupID, topicID, err := resolveIdentifiers(ctx, cfg, tgClient, console)
 	if err != nil {
 		return err
@@ -91,25 +93,48 @@ func run() error {
 
 	switch cfg.Command {
 	case "push":
-		return runSync(ctx, cfg, tgClient, console, true, groupID, topicID)
+		err = runSync(ctx, cfg, tgClient, console, true, groupID, topicID)
 	case "pull":
-		return runSync(ctx, cfg, tgClient, console, false, groupID, topicID)
-	case "list":
-		return runList(ctx, tgClient, console, groupID, topicID)
+		err = runSync(ctx, cfg, tgClient, console, false, groupID, topicID)
+	case "browse":
+		err = runBrowse(ctx, cfg, tgClient, console, groupID, topicID)
 	default:
 		return fmt.Errorf("unknown command: %s", cfg.Command)
 	}
+
+	if err != nil {
+		if err.Error() == "quitting" {
+			return nil
+		}
+		if err.Error() == "back" {
+			goto restart_identifiers
+		}
+		if navErr, ok := err.(*domain.NavigationError); ok && navErr.Type == "download" {
+			if req, ok := navErr.Data.(*domain.DownloadRequest); ok {
+				err = handleSingleDownload(ctx, cfg, tgClient, console, req, groupID, topicID)
+				if err == nil {
+					goto restart_identifiers // Return to browser after download
+				}
+			}
+		}
+	}
+	return err
 }
 
 func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
 	for {
 		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
-		if err != nil && err.Error() == "back" {
-			// Reset names to force re-selection if we were in a "back" flow
-			cfg.GroupName = ""
-			cfg.TopicName = ""
-			cfg.SubDir = ""
-			continue
+		if err != nil {
+			if err.Error() == "quitting" {
+				return 0, 0, err
+			}
+			if err.Error() == "back" {
+				// Reset names to force re-selection if we were in a "back" flow
+				cfg.GroupName = ""
+				cfg.TopicName = ""
+				cfg.SubDir = ""
+				continue
+			}
 		}
 		return groupID, topicID, err
 	}
@@ -231,7 +256,44 @@ func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.Teleg
 	return syncer.Pull(ctx, cfg.DirPath, groupID, topicID)
 }
 
-func runList(ctx context.Context, storage *telegram.TelegramClient, ui *ui.ConsoleUI, groupID, topicID int64) error {
-	browser := usecase.NewBrowser(storage, ui)
-	return browser.ListAndBrowse(ctx, groupID, topicID)
+func runBrowse(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI, groupID, topicID int64) error {
+	browser := usecase.NewBrowser(storage, console)
+	err := browser.ListAndBrowse(ctx, groupID, topicID)
+	return err
+}
+
+func handleSingleDownload(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, req *domain.DownloadRequest, groupID, topicID int64) error {
+	localFS := filesystem.NewLocalFileSystem()
+
+	// Determine local path
+	localPath := filepath.Join(cfg.DirPath, req.File.Meta.Path)
+	localDir := filepath.Dir(localPath)
+
+	if err := localFS.EnsureDir(localDir); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	ui.SetTotalFiles(1)
+	task := ui.Start(req.File.Meta.Path, req.File.Size)
+
+	body, err := storage.DownloadFile(ctx, groupID, topicID, req.File.MessageID, req.File.Meta.Path, req.File.Size)
+	if err != nil {
+		task.Abort()
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer body.Close()
+
+	if err := localFS.WriteFile(localPath, body); err != nil {
+		task.Abort()
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if err := localFS.SetModTime(localPath, req.File.Meta.ModTime); err != nil {
+		log.Printf("Warning: failed to set modification time for %s: %v", localPath, err)
+	}
+
+	task.Complete()
+	ui.Wait()
+
+	return nil
 }

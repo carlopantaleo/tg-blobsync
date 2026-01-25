@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/vbauerster/mpb/v8"
-	"github.com/vbauerster/mpb/v8/decor"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -24,12 +23,14 @@ import (
 
 // ConsoleUI handles user interactions via the terminal.
 type ConsoleUI struct {
-	progress       *mpb.Progress
-	nonInteractive bool
-	totalFiles     int
-	startedFiles   int
-	completedFiles int
-	mu             sync.Mutex
+	progress           *mpb.Progress
+	nonInteractive     bool
+	totalFiles         int
+	startedFiles       int
+	completedFiles     int
+	activeTasks        map[string]*ConsoleTask
+	interactiveContent string
+	mu                 sync.Mutex
 
 	tuiProgram        *tea.Program
 	tuiModel          *model
@@ -66,6 +67,27 @@ func NewConsoleUI(nonInteractive bool) *ConsoleUI {
 	return ui
 }
 
+func (u *ConsoleUI) WaitForInput(message string) error {
+	if u.nonInteractive || u.tuiProgram == nil {
+		return nil
+	}
+
+	// Update content and show prompt separately to ensure content is visible
+	u.tuiProgram.Send(updateContentMsg(message))
+
+	// We can use a simple prompt to wait for Enter
+	ti := textinput.New()
+	ti.Focus()
+	u.tuiModel.promptLabel = "Press Enter to continue..."
+	u.tuiProgram.Send(showPromptMsg{input: ti})
+
+	_, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return errors.New("quitting")
+	}
+	return nil
+}
+
 func (u *ConsoleUI) Close() {
 	if u.tuiProgram != nil {
 		u.tuiProgram.Quit()
@@ -75,59 +97,89 @@ func (u *ConsoleUI) Close() {
 
 func (u *ConsoleUI) SetTotalFiles(total int) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	u.totalFiles = total
 	u.startedFiles = 0
 	u.completedFiles = 0
+	u.activeTasks = make(map[string]*ConsoleTask)
+	u.mu.Unlock()
+	u.updateInteractive()
 }
 
 // Progress Reporter Implementation
 
 func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
 	u.mu.Lock()
+	defer u.mu.Unlock()
 	u.startedFiles++
-	currentFileNum := u.startedFiles
-	totalFiles := u.totalFiles
-	u.mu.Unlock()
+	task := &ConsoleTask{
+		ui:        u,
+		name:      name,
+		total:     total,
+		startTime: time.Now(),
+	}
+	if u.activeTasks == nil {
+		u.activeTasks = make(map[string]*ConsoleTask)
+	}
+	u.activeTasks[name] = task
+	u.updateInteractiveLocked()
+	return task
+}
 
-	displayName := name
-	if totalFiles > 0 {
-		displayName = fmt.Sprintf("[%d/%d] %s", currentFileNum, totalFiles, name)
+func (u *ConsoleUI) updateInteractive() {
+	if u.nonInteractive || u.tuiProgram == nil {
+		return
 	}
 
-	if u.nonInteractive {
-		return &nonInteractiveTask{
-			name:      displayName,
-			total:     total,
-			startTime: time.Now(),
-			onComplete: func() {
-				u.mu.Lock()
-				u.completedFiles++
-				u.mu.Unlock()
-			},
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.updateInteractiveLocked()
+}
+
+func (u *ConsoleUI) updateInteractiveLocked() {
+	if u.tuiProgram == nil {
+		return
+	}
+	var sb strings.Builder
+	if u.totalFiles > 0 {
+		sb.WriteString(fmt.Sprintf("Progress: %d/%d files completed\n\n", u.completedFiles, u.totalFiles))
+
+		// Sort task names for consistent display
+		var names []string
+		for name := range u.activeTasks {
+			names = append(names, name)
 		}
+		sort.Strings(names)
+
+		for _, name := range names {
+			task := u.activeTasks[name]
+			percent := float64(0)
+			if task.total > 0 {
+				percent = float64(task.current) / float64(task.total) * 100
+			}
+
+			// Calculate speed
+			speedStr := ""
+			elapsed := time.Since(task.startTime).Seconds()
+			if elapsed > 0 {
+				speed := float64(task.current) / elapsed
+				speedStr = fmt.Sprintf(" %8s/s", formatSize(int64(speed)))
+			}
+
+			// Simple progress bar
+			barWidth := 20
+			filled := int(float64(barWidth) * percent / 100)
+			if filled > barWidth {
+				filled = barWidth
+			}
+			bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+
+			sb.WriteString(fmt.Sprintf("%-30s [%s] %5.1f%%%s\n", name, bar, percent, speedStr))
+		}
+	} else if u.interactiveContent != "" {
+		sb.WriteString(u.interactiveContent)
 	}
 
-	bar := u.progress.AddBar(total,
-		mpb.PrependDecorators(
-			decor.Name(displayName, decor.WC{W: len(displayName) + 1}),
-			decor.Counters(decor.SizeB1024(0), "% .2f / % .2f", decor.WCSyncSpace),
-		),
-		mpb.AppendDecorators(
-			decor.OnComplete(
-				decor.Percentage(decor.WCSyncSpace), "done",
-			),
-			decor.AverageSpeed(decor.SizeB1024(0), "% .2f", decor.WCSyncSpace),
-		),
-	)
-	return &mpbTask{
-		bar: bar,
-		onComplete: func() {
-			u.mu.Lock()
-			u.completedFiles++
-			u.mu.Unlock()
-		},
-	}
+	u.tuiProgram.Send(updateContentMsg(sb.String()))
 }
 
 func (u *ConsoleUI) Wait() {
@@ -152,15 +204,27 @@ func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 			listItem{title: "Cancel/Exit", value: "cancel"},
 		}
 
-		l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+		d := list.NewDefaultDelegate()
+		d.ShowDescription = false
+		d.SetHeight(1)
+		d.SetSpacing(0)
+		l := list.New(items, d, 0, 0)
 		l.Title = "Action Required"
 
 		u.tuiProgram.Send(showListMsg{list: l})
 
-		res := <-u.tuiModel.responseChan
+		res, ok := <-u.tuiModel.responseChan
+		if !ok {
+			return false, errors.New("quitting")
+		}
 		if item, ok := res.(listItem); ok {
 			switch item.value.(string) {
 			case "start":
+				u.mu.Lock()
+				u.interactiveContent = ""
+				u.totalFiles = len(plan.Items) // Ensure total files is set for progress bars
+				u.mu.Unlock()
+				u.updateInteractive()
 				return true, nil
 			case "details":
 				u.showDetailedChanges(plan)
@@ -174,113 +238,96 @@ func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 }
 
 func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
-	var sb strings.Builder
-	sb.WriteString("--- Detailed Changes ---\n\nActions:\n")
+	if u.nonInteractive || u.tuiProgram == nil {
+		return
+	}
+	var items []list.Item
 	for _, item := range plan.Items {
-		symbol := "?"
-		actionName := ""
-
+		var actionStr string
+		var prefix string
 		switch item.Action {
 		case domain.ActionUpload:
-			if item.RemoteFile != nil {
-				symbol = "[*] Update"
-				actionName = "Upload (update)"
-			} else {
-				symbol = "[+] New   "
-				actionName = "Upload (new)"
-			}
+			prefix = "[+]"
+			actionStr = "Upload"
 		case domain.ActionDownload:
-			if item.LocalFile != nil {
-				symbol = "[*] Update"
-				actionName = "Download (update)"
-			} else {
-				symbol = "[v] New   "
-				actionName = "Download (new)"
-			}
+			prefix = "[v]"
+			actionStr = "Download"
 		case domain.ActionDeleteRemote:
-			symbol = "[-] Delete"
-			actionName = "Delete Remote"
+			prefix = "[-]"
+			actionStr = "Delete Remote"
 		case domain.ActionDeleteLocal:
-			symbol = "[-] Delete"
-			actionName = "Delete Local"
+			prefix = "[-]"
+			actionStr = "Delete Local"
 		case domain.ActionSkip:
-			symbol = "[.] Skip  "
-			actionName = "Skip"
+			prefix = "[.]"
+			actionStr = "Skip"
 		}
 
-		reasonStr := ""
-		if item.Reason != "" {
-			reasonStr = fmt.Sprintf(" (%s)", item.Reason)
-		}
-
-		sb.WriteString(fmt.Sprintf("  %s %-40s %-20s %s\n", symbol, item.Path, actionName, reasonStr))
+		title := fmt.Sprintf("%-3s %-12s %-40s | %s", prefix, actionStr, item.Path, item.Reason)
+		items = append(items, listItem{title: title, value: item})
 	}
-	sb.WriteString("------------------------\n")
 
-	if u.nonInteractive {
-		fmt.Print(sb.String())
+	// Add a back option
+	items = append([]list.Item{listItem{title: ".. [Back to Confirmation]", value: "back"}}, items...)
+
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+
+	l := list.New(items, d, 0, 0)
+	l.Title = fmt.Sprintf("Detailed Changes (%d items)", len(plan.Items))
+
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	// Wait for user to go back
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
 		return
 	}
 
-	u.tuiProgram.Send(updateContentMsg(sb.String()))
-	u.Prompt("Press Enter to continue")
+	// Whatever the user selects (unless it's back, we already handled the navigation),
+	// we just return to the main confirmation loop.
+	// The caller (ConfirmSync) is in a loop, so it will re-show the confirmation menu.
+	_ = res
 }
 
-type mpbTask struct {
-	bar        *mpb.Bar
-	onComplete func()
+type ConsoleTask struct {
+	ui        *ConsoleUI
+	name      string
+	total     int64
+	mu        sync.Mutex
+	current   int64
+	startTime time.Time
 }
 
-func (t *mpbTask) Increment(n int) {
-	t.bar.IncrBy(n)
-}
-
-func (t *mpbTask) SetCurrent(current int64) {
-	t.bar.SetCurrent(current)
-}
-
-func (t *mpbTask) Complete() {
-	t.bar.SetTotal(-1, true)
-	if t.onComplete != nil {
-		t.onComplete()
-	}
-}
-
-func (t *mpbTask) Abort() {
-	t.bar.Abort(true)
-}
-
-type nonInteractiveTask struct {
-	name       string
-	total      int64
-	current    int64
-	startTime  time.Time
-	onComplete func()
-}
-
-func (t *nonInteractiveTask) Increment(n int) {
+func (t *ConsoleTask) Increment(n int) {
+	t.mu.Lock()
 	t.current += int64(n)
+	t.mu.Unlock()
+	t.ui.updateInteractive()
 }
 
-func (t *nonInteractiveTask) SetCurrent(current int64) {
+func (t *ConsoleTask) SetCurrent(current int64) {
+	t.mu.Lock()
 	t.current = current
+	t.mu.Unlock()
+	t.ui.updateInteractive()
 }
 
-func (t *nonInteractiveTask) Complete() {
-	elapsed := time.Since(t.startTime).Seconds()
-	speed := float64(t.current) / elapsed
-	fmt.Printf("Finished: %s | Size: %s | Speed: %s/s\n",
-		t.name,
-		formatSize(t.current),
-		formatSize(int64(speed)),
-	)
-	if t.onComplete != nil {
-		t.onComplete()
-	}
+func (t *ConsoleTask) Complete() {
+	t.ui.mu.Lock()
+	t.ui.completedFiles++
+	delete(t.ui.activeTasks, t.name)
+	t.ui.mu.Unlock()
+	t.ui.updateInteractive()
 }
 
-func (t *nonInteractiveTask) Abort() {
-	fmt.Printf("Failed: %s (Transfer aborted due to error)\n", t.name)
+func (t *ConsoleTask) Abort() {
+	t.ui.mu.Lock()
+	delete(t.ui.activeTasks, t.name)
+	t.ui.mu.Unlock()
+	t.ui.updateInteractive()
 }
 
 func formatSize(b int64) string {
@@ -318,12 +365,19 @@ func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error)
 		})
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
 	l.Title = "Select Session"
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "", errors.New("quitting")
+	}
 	if item, ok := res.(listItem); ok {
 		return item.value.(string), nil
 	}
@@ -342,12 +396,19 @@ func (u *ConsoleUI) ConfirmDeleteSession(session domain.SessionInfo) (bool, erro
 		listItem{title: "No, Keep", value: false},
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
 	l.Title = fmt.Sprintf("Delete session %s?", session.ID)
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return false, errors.New("quitting")
+	}
 	if item, ok := res.(listItem); ok {
 		return item.value.(bool), nil
 	}
@@ -387,12 +448,19 @@ func (u *ConsoleUI) SelectSessionAction() (string, error) {
 		listItem{title: "Exit", value: "exit"},
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
 	l.Title = "Choose Action"
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "exit", errors.New("quitting")
+	}
 	if item, ok := res.(listItem); ok {
 		return item.value.(string), nil
 	}
@@ -413,14 +481,16 @@ func (u *ConsoleUI) GetPhoneNumber() (string, error) {
 	u.tuiModel.promptLabel = "Enter Phone Number (international format, e.g. +39...)"
 	u.tuiProgram.Send(showPromptMsg{input: ti})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "", errors.New("quitting")
+	}
 	if s, ok := res.(string); ok {
 		return s, nil
 	}
 	return "", errors.New("prompt cancelled")
 }
 
-// GetCode prompts the user for the authentication code.
 func (u *ConsoleUI) GetCode() (string, error) {
 	if u.nonInteractive {
 		return "", errors.New("cannot prompt for code in non-interactive mode")
@@ -433,7 +503,10 @@ func (u *ConsoleUI) GetCode() (string, error) {
 	u.tuiModel.promptLabel = "Enter Code"
 	u.tuiProgram.Send(showPromptMsg{input: ti})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "", errors.New("quitting")
+	}
 	if s, ok := res.(string); ok {
 		return s, nil
 	}
@@ -486,7 +559,10 @@ func (u *ConsoleUI) SelectGroup(groups []domain.Group) (domain.Group, error) {
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return domain.Group{}, errors.New("quitting")
+	}
 	if g, ok := res.(listItem); ok {
 		return g.value.(domain.Group), nil
 	}
@@ -519,7 +595,10 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return domain.Topic{}, errors.New("quitting")
+	}
 	if item, ok := res.(listItem); ok {
 		if val, ok := item.value.(string); ok && val == "back" {
 			return domain.Topic{}, errors.New("back")
@@ -541,7 +620,7 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 		listItem{title: "[ Enter custom path ]", value: "custom"},
 	}
 	for _, s := range existingSubDirs {
-		items = append(items, listItem{title: s, value: s})
+		items = append(items, listItem{title: "\U0001F4C1 " + s, value: s})
 	}
 
 	d := list.NewDefaultDelegate()
@@ -553,7 +632,10 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 
 	u.tuiProgram.Send(showListMsg{list: l})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "", errors.New("quitting")
+	}
 	if item, ok := res.(listItem); ok {
 		val, isStr := item.value.(string)
 		if isStr && val == "back" {
@@ -583,7 +665,10 @@ func (u *ConsoleUI) Prompt(label string) (string, error) {
 	u.tuiModel.promptLabel = label
 	u.tuiProgram.Send(showPromptMsg{input: ti})
 
-	res := <-u.tuiModel.responseChan
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "", errors.New("quitting")
+	}
 	if s, ok := res.(string); ok {
 		return s, nil
 	}
@@ -599,10 +684,10 @@ func (u *ConsoleUI) PromptInt(label string) (int64, error) {
 }
 
 // BrowseFiles allows interactive navigation of the virtual directory structure.
-func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
+func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) {
 	if len(files) == 0 {
 		u.tuiProgram.Send(updateContentMsg("No files to browse."))
-		return nil
+		return nil, nil
 	}
 
 	currentDir := ""
@@ -610,7 +695,7 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 		// Filter items in current directory
 		menu, currentDirTotalSize, err := u.buildBrowserItems(files, currentDir)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		displayDir := currentDir
@@ -635,15 +720,22 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 
 		u.tuiProgram.Send(showListMsg{list: l})
 
-		res := <-u.tuiModel.responseChan
+		res, ok := <-u.tuiModel.responseChan
+		if !ok {
+			return nil, errors.New("quitting")
+		}
 		selectedItem, ok := res.(listItem)
 		if !ok {
-			return errors.New("browsing cancelled")
+			return nil, errors.New("browsing cancelled")
 		}
 
 		selected := selectedItem.value.(browserMenuEntry)
-		if selected.Label == "Exit Browser" {
-			return nil
+		if selected.Label == "Exit" {
+			return nil, nil
+		}
+
+		if selected.Label == ".. [Back to Topics]" {
+			return nil, errors.New("back")
 		}
 
 		if selected.IsDir {
@@ -667,7 +759,13 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) error {
 		}
 
 		if selected.File != nil {
-			u.showFileDetails(selected.File)
+			action, err := u.showFileDetails(selected.File)
+			if err != nil {
+				return nil, err
+			}
+			if action == "download" {
+				return &domain.DownloadRequest{File: *selected.File}, nil
+			}
 		}
 	}
 }
@@ -719,6 +817,8 @@ func (u *ConsoleUI) buildBrowserItems(files []domain.RemoteFile, currentDir stri
 	}
 
 	var menu []browserMenuEntry
+	menu = append(menu, browserMenuEntry{Label: ".. [Back to Topics]", IsDir: false})
+
 	if currentDir != "" {
 		menu = append(menu, browserMenuEntry{Label: ".. [Go Up]", IsDir: true})
 	}
@@ -748,26 +848,44 @@ func (u *ConsoleUI) buildBrowserItems(files []domain.RemoteFile, currentDir stri
 		menu = append(menu, browserMenuEntry{Label: label, IsDir: false, File: &fCopy})
 	}
 
-	menu = append(menu, browserMenuEntry{Label: "Exit Browser", IsDir: false})
+	menu = append(menu, browserMenuEntry{Label: "Exit", IsDir: false})
 
 	return menu, currentDirTotalSize, nil
 }
 
-func (u *ConsoleUI) showFileDetails(f *domain.RemoteFile) {
+func (u *ConsoleUI) showFileDetails(f *domain.RemoteFile) (string, error) {
+	items := []list.Item{
+		listItem{title: "Download File", value: "download"},
+		listItem{title: ".. [Back to List]", value: "back"},
+	}
+
+	d := list.NewDefaultDelegate()
+	d.ShowDescription = false
+	d.SetHeight(1)
+	d.SetSpacing(0)
+	l := list.New(items, d, 0, 0)
+	l.Title = fmt.Sprintf("File: %s (%s)", filepath.Base(f.Meta.Path), formatSize(f.Size))
+
 	var sb strings.Builder
-	sb.WriteString("\n--- File Details ---\n")
+	sb.WriteString("--- File Details ---\n")
 	sb.WriteString(fmt.Sprintf("Path:     %s\n", f.Meta.Path))
 	sb.WriteString(fmt.Sprintf("Size:     %s\n", formatSize(f.Size)))
 	sb.WriteString(fmt.Sprintf("ModTime:  %s\n", time.Unix(f.Meta.ModTime, 0).Format(time.RFC3339)))
 	if f.Meta.Checksum != "" {
 		sb.WriteString(fmt.Sprintf("Checksum: %s\n", f.Meta.Checksum))
 	}
-	if f.Meta.Flags != "" {
-		sb.WriteString(fmt.Sprintf("Flags:    %s\n", f.Meta.Flags))
-	}
 	sb.WriteString(fmt.Sprintf("MsgID:    %d\n", f.MessageID))
-	sb.WriteString("--------------------\n\n")
+	sb.WriteString("--------------------\n")
 
 	u.tuiProgram.Send(updateContentMsg(sb.String()))
-	u.Prompt("Press Enter to continue browsing")
+	u.tuiProgram.Send(showListMsg{list: l})
+
+	res, ok := <-u.tuiModel.responseChan
+	if !ok {
+		return "back", errors.New("quitting")
+	}
+	if item, ok := res.(listItem); ok {
+		return item.value.(string), nil
+	}
+	return "back", nil
 }
