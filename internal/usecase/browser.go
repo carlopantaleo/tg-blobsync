@@ -17,7 +17,7 @@ type browser struct {
 
 // BrowseUI defines the interface required by the browser use case for interaction
 type BrowseUI interface {
-	BrowseFiles(files []domain.RemoteFile) error
+	BrowseFiles(files []domain.RemoteFile) (interface{}, error)
 }
 
 func NewBrowser(storage domain.BlobStorage, ui BrowseUI) FileBrowser {
@@ -28,14 +28,25 @@ func NewBrowser(storage domain.BlobStorage, ui BrowseUI) FileBrowser {
 }
 
 func (b *browser) ListAndBrowse(ctx context.Context, groupID, topicID int64) error {
-	files, err := b.storage.ListFiles(ctx, groupID, topicID)
-	if err != nil {
-		return fmt.Errorf("failed to list files: %w", err)
-	}
+	for {
+		files, err := b.storage.ListFiles(ctx, groupID, topicID)
+		if err != nil {
+			return fmt.Errorf("failed to list files: %w", err)
+		}
 
-	if len(files) == 0 {
-		return fmt.Errorf("no files found in this topic")
-	}
+		if len(files) == 0 {
+			return fmt.Errorf("no files found in this topic")
+		}
 
-	return b.ui.BrowseFiles(files)
+		res, err := b.ui.BrowseFiles(files)
+		if err != nil {
+			return err
+		}
+
+		if req, ok := res.(*domain.DownloadRequest); ok {
+			return &domain.NavigationError{Type: "download", Data: req}
+		}
+
+		return nil
+	}
 }

@@ -54,6 +54,11 @@ type UserInterface interface {
 	SyncConfirmer
 	AuthInput
 	SessionSelector
+	TerminalInteractive
+}
+
+type TerminalInteractive interface {
+	WaitForInput(message string) error
 }
 
 type SessionSelector interface {
@@ -89,4 +94,17 @@ type FileSystem interface {
 	SetModTime(path string, modTime int64) error
 	DeleteFile(path string) error
 	EnsureDir(path string) error
+}
+
+type DownloadRequest struct {
+	File RemoteFile
+}
+
+type NavigationError struct {
+	Type string
+	Data interface{}
+}
+
+func (e *NavigationError) Error() string {
+	return e.Type
 }

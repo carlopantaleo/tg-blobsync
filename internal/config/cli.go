@@ -47,8 +47,8 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 			fmt.Fprintf(os.Stderr, "  tgblobsync push [flags] <local-path> [<group>:<topic>[:subdir]]\n")
 		case "pull":
 			fmt.Fprintf(os.Stderr, "  tgblobsync pull [flags] [<group>:<topic>[:subdir]] <local-path>\n")
-		case "list":
-			fmt.Fprintf(os.Stderr, "  tgblobsync list [flags] [<group>:<topic>]\n")
+		case "browse":
+			fmt.Fprintf(os.Stderr, "  tgblobsync browse [flags] [<group>:<topic>]\n")
 		}
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		fs.PrintDefaults()
@@ -77,7 +77,7 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 				cfg.DirPath = remaining[1]
 			}
 		}
-	case "list":
+	case "browse":
 		if len(remaining) > 0 {
 			parseTarget(remaining[0], cfg)
 		}

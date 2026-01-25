@@ -6,14 +6,14 @@ Please bear in mind that Telegram is not intended to be used as a blob storage a
 
 ## Features
 - **Bidirectional Sync**: Supports `push` (local to Telegram) and `pull` (Telegram to local) operations.
-- **Interactive Browser**: Navigate and explore virtual directories and files in a topic using the `list` command.
+- **Interactive Browser**: Navigate and explore virtual directories, download individual files using the `browse` command.
+- **TUI (Terminal User Interface)**: Modern and interactive UI powered by `Bubble Tea`, featuring real-time progress updates and intuitive selection menus.
 - **Efficient Synchronization**: Compare files using MD5 checksums or modification time (`--skip-md5`).
 - **High Performance**: Multithreaded file processing and parallelized chunk uploads for large files (works best with Telegram Premium).
 - **Forum Topics as Buckets**: Organizes files within specific Supergroup (Forum) Topics.
 - **Smart Handling of Special Files**: Correctly handles 0-byte (empty) files, which are natively rejected by Telegram.
 - **Metadata Preservation**: Stores and restores original file modification times and paths.
 - **Non-Interactive Mode**: Fully scriptable with the `--non-interactive` flag.
-- **Nice UI**: Interactive progress bars and selection menus using `mpb` and `promptui`.
 - **Multi-Session Management**: Manage multiple Telegram accounts and sessions using the `sessions` command.
 
 
@@ -75,13 +75,20 @@ tgblobsync pull [flags] [<group>:<topic>[:subdir]] <local-path>
 
 Example: `tgblobsync pull "My Supergroup:My Topic:subdir" ./restore-folder`
 
-#### List (Interactive Browser)
+#### Browse (Interactive Browser)
 
-Explores the virtual directory structure within a Telegram Topic.
+Explores the virtual directory structure within a Telegram Topic. Allows for interactive navigation and downloading specific files.
 
 ```bash
-tgblobsync list [flags] [<group>:<topic>]
+tgblobsync browse [flags] [<group>:<topic>]
 ```
+
+### Interactive Features
+
+- **Change Confirmation**: Detailed view of planned changes (Upload/Download/Delete) before execution, with a compact single-line layout for easy review.
+- **Subdirectory Selection**: Visual selection of existing remote subdirectories with folder icons.
+- **Input Waiting**: The tool clearly indicates when an operation is completed or when everything is up to date, waiting for user confirmation before exiting.
+
 
 ### Options
 
