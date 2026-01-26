@@ -25,6 +25,21 @@ var (
 	AppHash string
 )
 
+type identifierResolver interface {
+	ResolveGroup(ctx context.Context, groupID int64) error
+	FindGroupByName(ctx context.Context, name string) (*domain.Group, error)
+	FindTopicByName(ctx context.Context, groupID int64, name string) (*domain.Topic, error)
+	ListGroups(ctx context.Context) ([]domain.Group, error)
+	ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error)
+	ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error)
+}
+
+type selectionUI interface {
+	SelectGroup(groups []domain.Group) (domain.Group, error)
+	SelectTopic(topics []domain.Topic) (domain.Topic, error)
+	SelectSubDir(existingSubDirs []string) (string, error)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -121,7 +136,7 @@ restart_identifiers:
 	return err
 }
 
-func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
+func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, console selectionUI) (int64, int64, error) {
 	for {
 		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
 		if err != nil {
@@ -140,7 +155,7 @@ func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage *tel
 	}
 }
 
-func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI) (int64, int64, error) {
+func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, console selectionUI) (int64, int64, error) {
 	var groupID int64
 	var topicID int64
 
@@ -157,6 +172,9 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 			g, err := storage.FindGroupByName(ctx, cfg.GroupName)
 			if err != nil {
 				return 0, 0, err
+			}
+			if g == nil {
+				return 0, 0, fmt.Errorf("group not found: %s", cfg.GroupName)
 			}
 			groupID = g.ID
 		}
@@ -184,6 +202,9 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 				t, err := storage.FindTopicByName(ctx, groupID, cfg.TopicName)
 				if err != nil {
 					return 0, 0, err
+				}
+				if t == nil {
+					return 0, 0, fmt.Errorf("topic not found: %s", cfg.TopicName)
 				}
 				topicID = t.ID
 			}
@@ -226,7 +247,7 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 				if err != nil {
 					if err.Error() == "back" {
 						cfg.TopicName = "" // Reset topic to force re-selection
-						continue           // Go back to topic selection
+						return 0, 0, err   // Propagate back to caller to avoid tight loop
 					}
 					return 0, 0, err
 				}
@@ -239,7 +260,7 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 	return groupID, topicID, nil
 }
 
-func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, push bool, groupID int64, topicID int64) error {
+func runSync(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobStorage, ui domain.UserInterface, push bool, groupID int64, topicID int64) error {
 	localFS := filesystem.NewLocalFileSystem()
 	syncer := usecase.NewSynchronizer(localFS, storage, cfg.Workers, ui, cfg.SkipMD5)
 	syncer.SetSubDir(cfg.SubDir)
@@ -250,13 +271,13 @@ func runSync(ctx context.Context, cfg *config.CLIConfig, storage *telegram.Teleg
 	return syncer.Pull(ctx, cfg.DirPath, groupID, topicID)
 }
 
-func runBrowse(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, console *ui.ConsoleUI, groupID, topicID int64) error {
+func runBrowse(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobStorage, console usecase.BrowseUI, groupID, topicID int64) error {
 	browser := usecase.NewBrowser(storage, console)
 	err := browser.ListAndBrowse(ctx, groupID, topicID)
 	return err
 }
 
-func handleSingleDownload(ctx context.Context, cfg *config.CLIConfig, storage *telegram.TelegramClient, ui *ui.ConsoleUI, req *domain.DownloadRequest, groupID, topicID int64) error {
+func handleSingleDownload(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobStorage, ui domain.UserInterface, req *domain.DownloadRequest, groupID, topicID int64) error {
 	localFS := filesystem.NewLocalFileSystem()
 
 	// Determine local path

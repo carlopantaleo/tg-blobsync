@@ -138,3 +138,29 @@ func TestExecutor_Execute(t *testing.T) {
 		t.Errorf("Expected file to be written locally at %s", expectedLocalPath)
 	}
 }
+
+func TestExecutor_DeleteRemote(t *testing.T) {
+	mockFS := NewMockFileSystem()
+	mockStorage := NewMockBlobStorage()
+	mockUI := &MockUserInterface{Confirmed: true}
+
+	executor := NewExecutor(mockFS, mockStorage, 1, mockUI)
+	ctx := context.Background()
+	groupID := int64(10)
+	topicID := int64(20)
+	plan := domain.SyncPlan{
+		Items: []domain.SyncItem{{
+			Path:       "obsolete.txt",
+			Action:     domain.ActionDeleteRemote,
+			RemoteFile: &domain.RemoteFile{MessageID: 99},
+		}},
+		Summary: domain.SyncSummary{Total: 1, ToDelete: 1},
+	}
+
+	if err := executor.Execute(ctx, plan, "root", groupID, topicID); err != nil {
+		t.Fatalf("Execute(DeleteRemote) error: %v", err)
+	}
+	if mockStorage.LastDeleted.MessageID != 99 || mockStorage.LastDeleted.GroupID != groupID || mockStorage.LastDeleted.TopicID != topicID {
+		t.Fatalf("DeleteFile not called with expected ids: %+v", mockStorage.LastDeleted)
+	}
+}

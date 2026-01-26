@@ -56,9 +56,14 @@ func (m *MockFileSystem) EnsureDir(path string) error {
 
 // MockBlobStorage
 type MockBlobStorage struct {
-	Files  map[int64]map[int64][]domain.RemoteFile
-	Groups []domain.Group
-	Topics map[int64][]domain.Topic
+	Files       map[int64]map[int64][]domain.RemoteFile
+	Groups      []domain.Group
+	Topics      map[int64][]domain.Topic
+	LastDeleted struct {
+		GroupID   int64
+		TopicID   int64
+		MessageID int
+	}
 }
 
 func NewMockBlobStorage() *MockBlobStorage {
@@ -106,6 +111,9 @@ func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID
 }
 
 func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
+	m.LastDeleted.GroupID = groupID
+	m.LastDeleted.TopicID = topicID
+	m.LastDeleted.MessageID = messageID
 	return nil
 }
 

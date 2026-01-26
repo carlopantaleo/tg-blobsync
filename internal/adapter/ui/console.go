@@ -64,7 +64,18 @@ func NewConsoleUI() *ConsoleUI {
 
 // NewConsoleUITest constructs a headless ConsoleUI for tests.
 func NewConsoleUITest() *ConsoleUI {
-	return &ConsoleUI{originalLogOutput: log.Writer()}
+	m := initialModel()
+	return &ConsoleUI{
+		tuiModel:          &m,
+		progress:          mpb.New(mpb.WithWidth(64)),
+		originalLogOutput: log.Writer(),
+	}
+}
+
+func (u *ConsoleUI) send(msg tea.Msg) {
+	if u.tuiProgram != nil {
+		u.tuiProgram.Send(msg)
+	}
 }
 
 func (u *ConsoleUI) WaitForInput(message string) error {
@@ -73,13 +84,13 @@ func (u *ConsoleUI) WaitForInput(message string) error {
 	}
 
 	// Update content and show prompt separately to ensure content is visible
-	u.tuiProgram.Send(updateContentMsg(message))
+	u.send(updateContentMsg(message))
 
 	// We can use a simple prompt to wait for Enter
 	ti := textinput.New()
 	ti.Focus()
 	u.tuiModel.promptLabel = "Press Enter to continue..."
-	u.tuiProgram.Send(showPromptMsg{input: ti})
+	u.send(showPromptMsg{input: ti})
 
 	_, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -179,7 +190,7 @@ func (u *ConsoleUI) updateInteractiveLocked() {
 		sb.WriteString(u.interactiveContent)
 	}
 
-	u.tuiProgram.Send(updateContentMsg(sb.String()))
+	u.send(updateContentMsg(sb.String()))
 }
 
 func (u *ConsoleUI) Wait() {
@@ -204,7 +215,7 @@ func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 		l := list.New(items, d, 0, 0)
 		l.Title = "Action Required"
 
-		u.tuiProgram.Send(showListMsg{list: l})
+		u.send(showListMsg{list: l})
 
 		res, ok := <-u.tuiModel.responseChan
 		if !ok {
@@ -271,7 +282,7 @@ func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
 	l := list.New(items, d, 0, 0)
 	l.Title = fmt.Sprintf("Detailed Changes (%d items)", len(plan.Items))
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	// Wait for user to go back
 	res, ok := <-u.tuiModel.responseChan
@@ -361,7 +372,7 @@ func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error)
 	l := list.New(items, d, 0, 0)
 	l.Title = "Select Session"
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -388,7 +399,7 @@ func (u *ConsoleUI) ConfirmDeleteSession(session domain.SessionInfo) (bool, erro
 	l := list.New(items, d, 0, 0)
 	l.Title = fmt.Sprintf("Delete session %s?", session.ID)
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -417,7 +428,7 @@ func (u *ConsoleUI) ShowSessions(sessions []domain.SessionInfo) {
 		}
 	}
 	sb.WriteString("--------------------------\n")
-	u.tuiProgram.Send(updateContentMsg(sb.String()))
+	u.send(updateContentMsg(sb.String()))
 }
 
 // SelectSessionAction prompts the user for a session action.
@@ -436,7 +447,7 @@ func (u *ConsoleUI) SelectSessionAction() (string, error) {
 	l := list.New(items, d, 0, 0)
 	l.Title = "Choose Action"
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -456,7 +467,7 @@ func (u *ConsoleUI) GetPhoneNumber() (string, error) {
 	ti.Focus()
 
 	u.tuiModel.promptLabel = "Enter Phone Number (international format, e.g. +39...)"
-	u.tuiProgram.Send(showPromptMsg{input: ti})
+	u.send(showPromptMsg{input: ti})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -474,7 +485,7 @@ func (u *ConsoleUI) GetCode() (string, error) {
 	ti.Focus()
 
 	u.tuiModel.promptLabel = "Enter Code"
-	u.tuiProgram.Send(showPromptMsg{input: ti})
+	u.send(showPromptMsg{input: ti})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -495,7 +506,7 @@ func (u *ConsoleUI) GetPassword() (string, error) {
 	ti.Focus()
 
 	u.tuiModel.promptLabel = "Enter 2FA Password"
-	u.tuiProgram.Send(showPromptMsg{input: ti})
+	u.send(showPromptMsg{input: ti})
 
 	res := <-u.tuiModel.responseChan
 	if s, ok := res.(string); ok {
@@ -522,7 +533,7 @@ func (u *ConsoleUI) SelectGroup(groups []domain.Group) (domain.Group, error) {
 	l := list.New(items, d, 0, 0)
 	l.Title = "Select Group"
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -554,7 +565,7 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 	l := list.New(items, d, 0, 0)
 	l.Title = "Select Topic"
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -572,7 +583,7 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 // SelectSubDir prompts the user for a subdirectory path.
 func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 	items := []list.Item{
-		listItem{title: ".. [Back to Topics]", value: "back"},
+		listItem{title: ".. [Back to Groups]", value: "back"},
 		listItem{title: "[ Root / No subdirectory ]", value: ""},
 		listItem{title: "[ Enter custom path ]", value: "custom"},
 	}
@@ -587,7 +598,7 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 	l := list.New(items, d, 0, 0)
 	l.Title = "Select or enter subdirectory"
 
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -616,7 +627,7 @@ func (u *ConsoleUI) Prompt(label string) (string, error) {
 	ti.Focus()
 
 	u.tuiModel.promptLabel = label
-	u.tuiProgram.Send(showPromptMsg{input: ti})
+	u.send(showPromptMsg{input: ti})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
@@ -639,7 +650,7 @@ func (u *ConsoleUI) PromptInt(label string) (int64, error) {
 // BrowseFiles allows interactive navigation of the virtual directory structure.
 func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) {
 	if len(files) == 0 {
-		u.tuiProgram.Send(updateContentMsg("No files to browse."))
+		u.send(updateContentMsg("No files to browse."))
 		return nil, nil
 	}
 
@@ -671,7 +682,7 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) 
 		l := list.New(items, d, 0, 0)
 		l.Title = fmt.Sprintf("Browse Files - %s (%s)", displayDir, formatSize(currentDirTotalSize))
 
-		u.tuiProgram.Send(showListMsg{list: l})
+		u.send(showListMsg{list: l})
 
 		res, ok := <-u.tuiModel.responseChan
 		if !ok {
@@ -687,7 +698,7 @@ func (u *ConsoleUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) 
 			return nil, nil
 		}
 
-		if selected.Label == ".. [Back to Topics]" {
+		if selected.Label == ".. [Back to Groups]" {
 			return nil, errors.New("back")
 		}
 
@@ -770,7 +781,7 @@ func (u *ConsoleUI) buildBrowserItems(files []domain.RemoteFile, currentDir stri
 	}
 
 	var menu []browserMenuEntry
-	menu = append(menu, browserMenuEntry{Label: ".. [Back to Topics]", IsDir: false})
+	menu = append(menu, browserMenuEntry{Label: ".. [Back to Groups]", IsDir: false})
 
 	if currentDir != "" {
 		menu = append(menu, browserMenuEntry{Label: ".. [Go Up]", IsDir: true})
@@ -830,8 +841,8 @@ func (u *ConsoleUI) showFileDetails(f *domain.RemoteFile) (string, error) {
 	sb.WriteString(fmt.Sprintf("MsgID:    %d\n", f.MessageID))
 	sb.WriteString("--------------------\n")
 
-	u.tuiProgram.Send(updateContentMsg(sb.String()))
-	u.tuiProgram.Send(showListMsg{list: l})
+	u.send(updateContentMsg(sb.String()))
+	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {

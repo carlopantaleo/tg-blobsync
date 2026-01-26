@@ -62,3 +62,12 @@ func TestSynchronizer_Pull(t *testing.T) {
 	// Note: FS path depends on Executor implementation.
 	// Ideally we should check mockFS.Data
 }
+
+func TestSynchronizer_SetSubDir(t *testing.T) {
+	s := NewSynchronizer(NewMockFileSystem(), NewMockBlobStorage(), 1, &MockUserInterface{}, false)
+	s.SetSubDir("nested")
+
+	if s.subDir != "nested" {
+		t.Fatalf("subDir = %s, want nested", s.subDir)
+	}
+}

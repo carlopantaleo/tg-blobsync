@@ -26,8 +26,3 @@ func (s *Selector) ListGroups(ctx context.Context) ([]domain.Group, error) {
 func (s *Selector) ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error) {
 	return s.storage.ListTopics(ctx, groupID)
 }
-
-// Interactive selection logic might belong more in the UI adapter or a higher-level "Application" struct
-// that orchestrates UI and UseCases.
-// However, per requirements, we have a "Selector" use case.
-// Let's assume the UI drives this by calling ListGroups -> User Pick -> ListTopics -> User Pick.

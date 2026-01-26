@@ -1,10 +1,8 @@
-package domain_test
+package domain
 
 import (
 	"testing"
 	"time"
-
-	"tg-blobsync/internal/domain"
 )
 
 func TestEntities(t *testing.T) {
@@ -14,8 +12,8 @@ func TestEntities(t *testing.T) {
 
 	now := time.Now().Unix()
 
-	remote := domain.RemoteFile{
-		Meta: domain.FileMeta{
+	remote := RemoteFile{
+		Meta: FileMeta{
 			Path:     "test/path",
 			Checksum: "abc",
 			ModTime:  now,
@@ -28,7 +26,7 @@ func TestEntities(t *testing.T) {
 		t.Error("RemoteFile path mismatch")
 	}
 
-	local := domain.LocalFile{
+	local := LocalFile{
 		Path:     "test/path",
 		Checksum: "abc",
 		ModTime:  now,
@@ -40,16 +38,16 @@ func TestEntities(t *testing.T) {
 		t.Error("LocalFile path mismatch")
 	}
 
-	plan := domain.SyncPlan{
-		Items: []domain.SyncItem{
+	plan := SyncPlan{
+		Items: []SyncItem{
 			{
 				Path:       "test/path",
-				Action:     domain.ActionUpload,
+				Action:     ActionUpload,
 				LocalFile:  &local,
 				RemoteFile: nil,
 			},
 		},
-		Summary: domain.SyncSummary{
+		Summary: SyncSummary{
 			ToUpload: 1,
 			Total:    1,
 		},
@@ -57,5 +55,12 @@ func TestEntities(t *testing.T) {
 
 	if len(plan.Items) != 1 {
 		t.Error("SyncPlan items count mismatch")
+	}
+}
+
+func TestNavigationError(t *testing.T) {
+	err := &NavigationError{Type: "download", Data: "x"}
+	if err.Error() != "download" {
+		t.Fatalf("unexpected error string: %s", err.Error())
 	}
 }
