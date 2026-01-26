@@ -5,8 +5,8 @@ import (
 	"tg-blobsync/internal/domain"
 )
 
-func TestConsoleUI_NonInteractive(t *testing.T) {
-	ui := NewConsoleUI(true)
+func TestConsoleUI_Interactive(t *testing.T) {
+	ui := NewConsoleUI()
 
 	// Test SetTotalFiles
 	ui.SetTotalFiles(10)
@@ -42,30 +42,18 @@ func TestConsoleUI_NonInteractive(t *testing.T) {
 		t.Errorf("expected completedFiles 1 after abort, got %d", ui.completedFiles)
 	}
 
-	// Test interactive mode tasks (minimal check to ensure no panic)
-	uiInteractive := NewConsoleUI(false)
+	// Minimal checks that start/complete/abort work without panics
+	uiInteractive := NewConsoleUI()
 	taskInteractive := uiInteractive.Start("interactive.txt", 100)
 	taskInteractive.Increment(10)
 	taskInteractive.SetCurrent(20)
 	taskInteractive.Complete()
 	taskInteractive2 := uiInteractive.Start("interactive_abort.txt", 100)
 	taskInteractive2.Abort()
-
-	// Test ConfirmSync
-	plan := domain.SyncPlan{
-		Summary: domain.SyncSummary{Total: 1},
-	}
-	confirmed, err := ui.ConfirmSync(plan)
-	if err != nil {
-		t.Errorf("ConfirmSync error: %v", err)
-	}
-	if !confirmed {
-		t.Error("ConfirmSync(NonInteractive) should return true")
-	}
 }
 
 func TestConsoleUI_BuildBrowserItems(t *testing.T) {
-	ui := NewConsoleUI(true)
+	ui := NewConsoleUITest()
 	files := []domain.RemoteFile{
 		{Meta: domain.FileMeta{Path: "root.txt"}, Size: 100},
 		{Meta: domain.FileMeta{Path: "dir/file1.txt"}, Size: 200},
@@ -139,7 +127,7 @@ func TestConsoleUI_ShowDetailedChanges(t *testing.T) {
 	// Capturing stdout is possible but often platform dependent or verbose in Go without helper libs.
 	// Given the instructions, we can just ensure it runs.
 
-	ui := NewConsoleUI(true)
+	ui := NewConsoleUITest()
 	plan := domain.SyncPlan{
 		Items: []domain.SyncItem{
 			{Path: "up.txt", Action: domain.ActionUpload},

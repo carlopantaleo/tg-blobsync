@@ -10,18 +10,17 @@ import (
 
 // CLIConfig holds the configuration parsed from command line arguments.
 type CLIConfig struct {
-	Command        string
-	AppID          int
-	AppHash        string
-	SessionPath    string
-	GroupName      string
-	TopicName      string
-	DirPath        string
-	SubDir         string
-	Workers        int
-	UploadThreads  int
-	SkipMD5        bool
-	NonInteractive bool
+	Command       string
+	AppID         int
+	AppHash       string
+	SessionPath   string
+	GroupName     string
+	TopicName     string
+	DirPath       string
+	SubDir        string
+	Workers       int
+	UploadThreads int
+	SkipMD5       bool
 }
 
 // ParseCLI parses command line arguments and environment variables.
@@ -38,7 +37,6 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
 	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
-	fs.BoolVar(&cfg.NonInteractive, "non-interactive", false, "Disable interactive UI and progress bars")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", cmd)
@@ -116,12 +114,6 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 
 	if (cmd == "push" || cmd == "pull") && cfg.DirPath == "" {
 		return nil, fmt.Errorf("local path is required for push/pull commands")
-	}
-
-	if cfg.NonInteractive {
-		if cfg.GroupName == "" || cfg.TopicName == "" {
-			return nil, fmt.Errorf("group and topic names are required in non-interactive mode")
-		}
 	}
 
 	return cfg, nil

@@ -24,7 +24,6 @@ import (
 // ConsoleUI handles user interactions via the terminal.
 type ConsoleUI struct {
 	progress           *mpb.Progress
-	nonInteractive     bool
 	totalFiles         int
 	startedFiles       int
 	completedFiles     int
@@ -37,38 +36,39 @@ type ConsoleUI struct {
 	originalLogOutput io.Writer
 }
 
-func NewConsoleUI(nonInteractive bool) *ConsoleUI {
-	ui := &ConsoleUI{
-		nonInteractive:    nonInteractive,
-		originalLogOutput: log.Writer(),
-	}
+// NewConsoleUI constructs an interactive console UI.
+func NewConsoleUI() *ConsoleUI {
+	ui := &ConsoleUI{originalLogOutput: log.Writer()}
 
-	if !nonInteractive {
-		m := initialModel()
-		ui.tuiModel = &m
-		ui.tuiProgram = tea.NewProgram(m, tea.WithAltScreen())
+	m := initialModel()
+	ui.tuiModel = &m
+	ui.tuiProgram = tea.NewProgram(m, tea.WithAltScreen())
 
-		// Start Bubble Tea in a goroutine
-		go func() {
-			if _, err := ui.tuiProgram.Run(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
-			}
-		}()
+	// Start Bubble Tea in a goroutine
+	go func() {
+		if _, err := ui.tuiProgram.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error running TUI: %v\n", err)
+		}
+	}()
 
-		// Redirect log output to TUI
-		log.SetOutput(&TUIWriter{program: ui.tuiProgram})
+	// Redirect log output to TUI
+	log.SetOutput(&TUIWriter{program: ui.tuiProgram})
 
-		ui.progress = mpb.New(
-			mpb.WithOutput(&TUIWriter{program: ui.tuiProgram}), // This might need careful handling
-			mpb.WithWidth(64),
-		)
-	}
+	ui.progress = mpb.New(
+		mpb.WithOutput(&TUIWriter{program: ui.tuiProgram}), // This might need careful handling
+		mpb.WithWidth(64),
+	)
 
 	return ui
 }
 
+// NewConsoleUITest constructs a headless ConsoleUI for tests.
+func NewConsoleUITest() *ConsoleUI {
+	return &ConsoleUI{originalLogOutput: log.Writer()}
+}
+
 func (u *ConsoleUI) WaitForInput(message string) error {
-	if u.nonInteractive || u.tuiProgram == nil {
+	if u.tuiProgram == nil {
 		return nil
 	}
 
@@ -126,7 +126,7 @@ func (u *ConsoleUI) Start(name string, total int64) domain.ProgressTask {
 }
 
 func (u *ConsoleUI) updateInteractive() {
-	if u.nonInteractive || u.tuiProgram == nil {
+	if u.tuiProgram == nil {
 		return
 	}
 
@@ -183,9 +183,6 @@ func (u *ConsoleUI) updateInteractiveLocked() {
 }
 
 func (u *ConsoleUI) Wait() {
-	if u.nonInteractive {
-		return
-	}
 	u.progress.Wait()
 	// Re-initialize progress for next use if needed
 	u.progress = mpb.New(mpb.WithWidth(64))
@@ -193,10 +190,6 @@ func (u *ConsoleUI) Wait() {
 
 // ConfirmSync prompts the user to confirm the sync plan.
 func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
-	if u.nonInteractive {
-		return true, nil
-	}
-
 	for {
 		items := []list.Item{
 			listItem{title: "Start Transfer", value: "start"},
@@ -238,7 +231,7 @@ func (u *ConsoleUI) ConfirmSync(plan domain.SyncPlan) (bool, error) {
 }
 
 func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
-	if u.nonInteractive || u.tuiProgram == nil {
+	if u.tuiProgram == nil {
 		return
 	}
 	var items []list.Item
@@ -349,10 +342,6 @@ func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error)
 		return "", errors.New("no sessions available")
 	}
 
-	if u.nonInteractive {
-		return "", errors.New("cannot select session in non-interactive mode")
-	}
-
 	var items []list.Item
 	for _, s := range sessions {
 		active := ""
@@ -387,10 +376,6 @@ func (u *ConsoleUI) SelectSession(sessions []domain.SessionInfo) (string, error)
 
 // ConfirmDeleteSession prompts the user to confirm session deletion.
 func (u *ConsoleUI) ConfirmDeleteSession(session domain.SessionInfo) (bool, error) {
-	if u.nonInteractive {
-		return false, nil
-	}
-
 	items := []list.Item{
 		listItem{title: "Yes, Delete", value: true},
 		listItem{title: "No, Keep", value: false},
@@ -437,10 +422,6 @@ func (u *ConsoleUI) ShowSessions(sessions []domain.SessionInfo) {
 
 // SelectSessionAction prompts the user for a session action.
 func (u *ConsoleUI) SelectSessionAction() (string, error) {
-	if u.nonInteractive {
-		return "exit", nil
-	}
-
 	items := []list.Item{
 		listItem{title: "Create New Session", value: "create"},
 		listItem{title: "Select Active Session", value: "select"},
@@ -470,10 +451,6 @@ func (u *ConsoleUI) SelectSessionAction() (string, error) {
 
 // GetPhoneNumber prompts the user for the phone number.
 func (u *ConsoleUI) GetPhoneNumber() (string, error) {
-	if u.nonInteractive {
-		return "", errors.New("cannot prompt for phone number in non-interactive mode")
-	}
-
 	ti := textinput.New()
 	ti.Placeholder = "+39..."
 	ti.Focus()
@@ -492,10 +469,6 @@ func (u *ConsoleUI) GetPhoneNumber() (string, error) {
 }
 
 func (u *ConsoleUI) GetCode() (string, error) {
-	if u.nonInteractive {
-		return "", errors.New("cannot prompt for code in non-interactive mode")
-	}
-
 	ti := textinput.New()
 	ti.Placeholder = "12345"
 	ti.Focus()
@@ -515,10 +488,6 @@ func (u *ConsoleUI) GetCode() (string, error) {
 
 // GetPassword prompts the user for their 2FA password.
 func (u *ConsoleUI) GetPassword() (string, error) {
-	if u.nonInteractive {
-		return "", errors.New("cannot prompt for password in non-interactive mode")
-	}
-
 	ti := textinput.New()
 	ti.Placeholder = "Password"
 	ti.EchoMode = textinput.EchoPassword
@@ -539,10 +508,6 @@ func (u *ConsoleUI) GetPassword() (string, error) {
 func (u *ConsoleUI) SelectGroup(groups []domain.Group) (domain.Group, error) {
 	if len(groups) == 0 {
 		return domain.Group{}, errors.New("no groups available")
-	}
-
-	if u.nonInteractive {
-		return domain.Group{}, errors.New("cannot select group in non-interactive mode")
 	}
 
 	var items []list.Item
@@ -576,10 +541,6 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 		return domain.Topic{}, errors.New("no topics available")
 	}
 
-	if u.nonInteractive {
-		return domain.Topic{}, errors.New("cannot select topic in non-interactive mode")
-	}
-
 	var items []list.Item
 	items = append(items, listItem{title: ".. [Back to Groups]", value: "back"})
 	for _, t := range topics {
@@ -610,10 +571,6 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 
 // SelectSubDir prompts the user for a subdirectory path.
 func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
-	if u.nonInteractive {
-		return "", nil
-	}
-
 	items := []list.Item{
 		listItem{title: ".. [Back to Topics]", value: "back"},
 		listItem{title: "[ Root / No subdirectory ]", value: ""},
@@ -655,10 +612,6 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 
 // Helper to prompt for generic text
 func (u *ConsoleUI) Prompt(label string) (string, error) {
-	if u.nonInteractive {
-		return "", errors.New("cannot prompt in non-interactive mode")
-	}
-
 	ti := textinput.New()
 	ti.Focus()
 

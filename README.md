@@ -13,7 +13,6 @@ Please bear in mind that Telegram is not intended to be used as a blob storage a
 - **Forum Topics as Buckets**: Organizes files within specific Supergroup (Forum) Topics.
 - **Smart Handling of Special Files**: Correctly handles 0-byte (empty) files, which are natively rejected by Telegram.
 - **Metadata Preservation**: Stores and restores original file modification times and paths.
-- **Non-Interactive Mode**: Fully scriptable with the `--non-interactive` flag.
 - **Multi-Session Management**: Manage multiple Telegram accounts and sessions using the `sessions` command.
 
 
@@ -97,7 +96,6 @@ tgblobsync browse [flags] [<group>:<topic>]
 | `--workers` | Number of concurrent files to process | 1 |
 | `--upload-threads` | Number of parallel threads for a single file upload | 8 |
 | `--skip-md5` | Use modification time and size instead of MD5 checksums | false |
-| `--non-interactive` | Disable interactive UI and progress bars | false |
 
 > **Note**: For group or topic names containing spaces, wrap them in quotes (e.g., `"My Group:My Topic"`).
 

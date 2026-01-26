@@ -152,14 +152,6 @@ func TestParseCLI(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name:        "Non-interactive missing IDs",
-			args:        []string{"tgblobsync", "push", "--non-interactive", "/tmp"},
-			envAppID:    "12345",
-			envAppHash:  "abcdef",
-			expectedCmd: "push",
-			wantErr:     true,
-		},
-		{
 			name:        "No args",
 			args:        []string{"tgblobsync"},
 			envAppID:    "12345",

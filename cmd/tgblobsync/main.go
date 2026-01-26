@@ -41,7 +41,7 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	console := ui.NewConsoleUI(cfg.NonInteractive)
+	console := ui.NewConsoleUI()
 	defer console.Close()
 
 	sessionDir := filepath.Dir(cfg.SessionPath)
@@ -161,9 +161,6 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 			groupID = g.ID
 		}
 	} else {
-		if cfg.NonInteractive {
-			return 0, 0, fmt.Errorf("group name is required in non-interactive mode")
-		}
 		log.Println("Fetching groups...")
 		groups, err := storage.ListGroups(ctx)
 		if err != nil {
@@ -191,9 +188,6 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 				topicID = t.ID
 			}
 		} else {
-			if cfg.NonInteractive {
-				return 0, 0, fmt.Errorf("topic name is required in non-interactive mode")
-			}
 			log.Println("Fetching topics...")
 			topics, err := storage.ListTopics(ctx, groupID)
 			if err != nil {
@@ -211,7 +205,7 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 		}
 
 		// 3. SubDir selection
-		if cfg.SubDir == "" && !cfg.NonInteractive && (cfg.Command == "push" || cfg.Command == "pull") {
+		if cfg.SubDir == "" && (cfg.Command == "push" || cfg.Command == "pull") {
 			files, err := storage.ListFiles(ctx, groupID, topicID)
 			if err == nil {
 				subdirsMap := make(map[string]bool)
