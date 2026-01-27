@@ -66,9 +66,6 @@ func NewConsoleUI() *ConsoleUI {
 		mpb.WithWidth(64),
 	)
 
-	// Default background message
-	ui.send(updateContentMsg("Please wait..."))
-
 	return ui
 }
 
@@ -114,8 +111,6 @@ func (u *ConsoleUI) WaitForInput(message string) error {
 	if !ok {
 		return errors.New("quitting")
 	}
-
-	u.send(updateContentMsg("Please wait..."))
 
 	return nil
 }

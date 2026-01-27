@@ -87,7 +87,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		interactiveHeight := m.height - logHeight - 1
-		m.list.SetSize(m.width, interactiveHeight)
+		m.list.SetSize(m.width, m.listHeight(interactiveHeight))
 
 		m.viewport.Width = m.width
 		m.viewport.Height = logHeight
@@ -111,6 +111,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showList {
 			if msg.String() == "enter" {
 				m.responseChan <- m.list.SelectedItem()
+				m.interactiveContent = ""
 				m.showList = false
 				return m, nil
 			}
@@ -121,6 +122,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showPrompt {
 			if msg.String() == "enter" {
 				m.responseChan <- m.textInput.Value()
+				m.interactiveContent = ""
 				m.showPrompt = false
 				return m, nil
 			}
@@ -153,7 +155,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case showListMsg:
 		m.list = msg.list
-		m.list.SetSize(m.width, m.height-m.viewport.Height-1)
+		interactiveHeight := m.height - m.viewport.Height - 1
+		m.list.SetSize(m.width, m.listHeight(interactiveHeight))
 		m.list.KeyMap.Quit.SetEnabled(false) // Disable list's internal quit to handle it in our Update
 		m.showList = true
 		m.showPrompt = false
@@ -204,6 +207,19 @@ func (m model) View() string {
 		Render(m.viewport.View())
 
 	return lipgloss.JoinVertical(lipgloss.Left, upperArea, lowerArea)
+}
+
+func (m model) listHeight(interactiveHeight int) int {
+	headerLines := 0
+	if m.interactiveContent != "" {
+		headerLines = strings.Count(m.interactiveContent, "\n") + 1 // content lines
+		headerLines++                                               // blank line before list
+	}
+	height := interactiveHeight - headerLines
+	if height < 1 {
+		height = 1
+	}
+	return height
 }
 
 func (m model) wrapLogs() string {
