@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,6 +29,9 @@ type model struct {
 	width  int
 	height int
 
+	// Cancellation support
+	cancelFunc context.CancelFunc
+
 	// Upper area state
 	interactiveContent string
 	list               list.Model
@@ -47,6 +51,10 @@ type model struct {
 
 	// Control
 	quitting bool
+}
+
+type setCancelMsg struct {
+	cancel context.CancelFunc
 }
 
 func initialModel() model {
@@ -86,10 +94,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.wrapLogs())
 		m.viewport.GotoBottom()
 
+	case setCancelMsg:
+		m.cancelFunc = msg.cancel
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			m.quitting = true
+			if m.cancelFunc != nil {
+				m.cancelFunc()
+			}
 			close(m.responseChan) // Signal blocking calls to stop
 			return m, tea.Quit
 		}
@@ -168,7 +182,11 @@ func (m model) View() string {
 
 	var upperContent string
 	if m.showList {
-		upperContent = m.list.View()
+		if m.interactiveContent != "" {
+			upperContent = fmt.Sprintf("%s\n\n%s", m.interactiveContent, m.list.View())
+		} else {
+			upperContent = m.list.View()
+		}
 	} else if m.showPrompt {
 		upperContent = fmt.Sprintf("%s\n\n%s\n\n%s", m.interactiveContent, m.promptLabel, m.textInput.View())
 	} else {

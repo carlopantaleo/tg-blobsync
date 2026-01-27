@@ -57,6 +57,7 @@ func run() error {
 	defer cancel()
 
 	console := ui.NewConsoleUI()
+	console.SetCancel(cancel)
 	defer console.Close()
 
 	sessionDir := filepath.Dir(cfg.SessionPath)

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +63,14 @@ func NewConsoleUI() *ConsoleUI {
 	return ui
 }
 
+// SetCancel assigns a cancel function that will be triggered on quit (q/ctrl+c).
+func (u *ConsoleUI) SetCancel(cancel context.CancelFunc) {
+	if u.tuiProgram == nil {
+		return
+	}
+	u.send(setCancelMsg{cancel: cancel})
+}
+
 // NewConsoleUITest constructs a headless ConsoleUI for tests.
 func NewConsoleUITest() *ConsoleUI {
 	m := initialModel()
@@ -102,6 +111,7 @@ func (u *ConsoleUI) WaitForInput(message string) error {
 func (u *ConsoleUI) Close() {
 	if u.tuiProgram != nil {
 		u.tuiProgram.Quit()
+		_ = u.tuiProgram.ReleaseTerminal()
 		log.SetOutput(u.originalLogOutput)
 	}
 }
