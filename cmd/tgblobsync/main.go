@@ -32,12 +32,14 @@ type identifierResolver interface {
 	ListGroups(ctx context.Context) ([]domain.Group, error)
 	ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error)
 	ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error)
+	GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error)
 }
 
 type selectionUI interface {
 	SelectGroup(groups []domain.Group) (domain.Group, error)
 	SelectTopic(topics []domain.Topic) (domain.Topic, error)
 	SelectSubDir(existingSubDirs []string) (string, error)
+	ShowGroupTotals(totals domain.GroupTotals) error
 }
 
 func main() {
@@ -220,6 +222,14 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 				if err.Error() == "back" {
 					cfg.GroupName = "" // Reset group to force re-selection
 					return 0, 0, err
+				}
+				if err.Error() == "totals" {
+					totals, tErr := storage.GroupTotals(ctx, groupID)
+					if tErr != nil {
+						return 0, 0, tErr
+					}
+					_ = console.ShowGroupTotals(totals)
+					continue
 				}
 				return 0, 0, err
 			}

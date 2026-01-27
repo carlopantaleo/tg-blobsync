@@ -74,6 +74,7 @@ type BlobStorage interface {
 	Start(ctx context.Context) error
 	ListGroups(ctx context.Context) ([]Group, error)
 	ListTopics(ctx context.Context, groupID int64) ([]Topic, error)
+	GroupTotals(ctx context.Context, groupID int64) (GroupTotals, error)
 
 	// File Operations
 	ListFiles(ctx context.Context, groupID int64, topicID int64) ([]RemoteFile, error)

@@ -8,6 +8,12 @@ type FileMeta struct {
 	Flags    string `json:"f,omitempty"`
 }
 
+// GroupTotals contains aggregated information for a group.
+type GroupTotals struct {
+	Files     int
+	TotalSize int64
+}
+
 // RemoteFile represents a file stored on Telegram.
 type RemoteFile struct {
 	Meta      FileMeta

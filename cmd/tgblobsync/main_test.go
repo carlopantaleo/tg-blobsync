@@ -93,6 +93,10 @@ func (s *stubConsole) SelectSubDir(_ []string) (string, error) {
 	return s.subdir, s.subdirErr
 }
 
+func (s *stubConsole) ShowGroupTotals(_ domain.GroupTotals) error {
+	return nil
+}
+
 type stubTelegram struct {
 	groupByName           *domain.Group
 	topicByName           *domain.Topic
@@ -138,6 +142,10 @@ func (s *stubTelegram) ListTopics(_ context.Context, _ int64) ([]domain.Topic, e
 func (s *stubTelegram) ListFiles(_ context.Context, _ int64, _ int64) ([]domain.RemoteFile, error) {
 	s.listFilesCalled = true
 	return s.files, nil
+}
+
+func (s *stubTelegram) GroupTotals(_ context.Context, _ int64) (domain.GroupTotals, error) {
+	return domain.GroupTotals{}, nil
 }
 
 func TestResolveIdentifiers_GroupNotFound(t *testing.T) {

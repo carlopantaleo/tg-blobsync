@@ -97,6 +97,19 @@ func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID 
 	return []domain.RemoteFile{}, nil
 }
 
+func (m *MockBlobStorage) GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error) {
+	var totals domain.GroupTotals
+	if topics, ok := m.Files[groupID]; ok {
+		for _, files := range topics {
+			for _, f := range files {
+				totals.Files++
+				totals.TotalSize += f.Size
+			}
+		}
+	}
+	return totals, nil
+}
+
 func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
 	if m.Files[groupID] == nil {
 		m.Files[groupID] = make(map[int64][]domain.RemoteFile)

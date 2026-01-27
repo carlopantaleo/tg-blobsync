@@ -37,6 +37,12 @@ type ConsoleUI struct {
 	originalLogOutput io.Writer
 }
 
+// ShowGroupTotals displays aggregated info for a group.
+func (u *ConsoleUI) ShowGroupTotals(totals domain.GroupTotals) error {
+	message := fmt.Sprintf("--- Group totals ---\nFiles: %d\nSize:  %s\n--------------------\n\nPress Enter to return", totals.Files, formatSize(totals.TotalSize))
+	return u.WaitForInput(message)
+}
+
 // NewConsoleUI constructs an interactive console UI.
 func NewConsoleUI() *ConsoleUI {
 	ui := &ConsoleUI{originalLogOutput: log.Writer()}
@@ -59,6 +65,9 @@ func NewConsoleUI() *ConsoleUI {
 		mpb.WithOutput(&TUIWriter{program: ui.tuiProgram}), // This might need careful handling
 		mpb.WithWidth(64),
 	)
+
+	// Default background message
+	ui.send(updateContentMsg("Please wait..."))
 
 	return ui
 }
@@ -105,6 +114,9 @@ func (u *ConsoleUI) WaitForInput(message string) error {
 	if !ok {
 		return errors.New("quitting")
 	}
+
+	u.send(updateContentMsg("Please wait..."))
+
 	return nil
 }
 
@@ -564,6 +576,7 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 
 	var items []list.Item
 	items = append(items, listItem{title: ".. [Back to Groups]", value: "back"})
+	items = append(items, listItem{title: "[ Show group totals ]", value: "totals"})
 	for _, t := range topics {
 		items = append(items, listItem{title: t.Title, value: t})
 	}
@@ -584,6 +597,9 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 	if item, ok := res.(listItem); ok {
 		if val, ok := item.value.(string); ok && val == "back" {
 			return domain.Topic{}, errors.New("back")
+		}
+		if val, ok := item.value.(string); ok && val == "totals" {
+			return domain.Topic{}, errors.New("totals")
 		}
 		return item.value.(domain.Topic), nil
 	}
