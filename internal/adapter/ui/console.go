@@ -194,7 +194,7 @@ func (u *ConsoleUI) updateInteractiveLocked() {
 			}
 			bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
-			sb.WriteString(fmt.Sprintf("%-30s [%s] %5.1f%%%s\n", name, bar, percent, speedStr))
+			sb.WriteString(fmt.Sprintf("%-30s [%s] %5.1f%% %s / %s%s\n", name, bar, percent, formatSize(task.current), formatSize(task.total), speedStr))
 		}
 	} else if u.interactiveContent != "" {
 		sb.WriteString(u.interactiveContent)
