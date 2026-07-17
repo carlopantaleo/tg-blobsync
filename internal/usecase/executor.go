@@ -166,7 +166,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 	fullPath := filepath.Join(rootDir, item.Path)
 
 	operation := func() error {
-		if remoteFile.Meta.Flags == "EMPTY_FILE" {
+		if remoteFile.Meta.Flags == domain.EmptyFileFlag {
 			log.Printf("[*] Restoring empty file: %s", item.Path)
 			if err := e.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
 				return fmt.Errorf("error creating empty file %s: %w", item.Path, err)

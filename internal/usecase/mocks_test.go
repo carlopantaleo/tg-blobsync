@@ -97,6 +97,18 @@ func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID 
 	return []domain.RemoteFile{}, nil
 }
 
+func (m *MockBlobStorage) GetIndex(ctx context.Context, groupID int64, topicID int64) (*domain.FileIndex, int, bool, error) {
+	return nil, 0, false, nil
+}
+
+func (m *MockBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicID int64, index domain.FileIndex) (int, error) {
+	return 0, nil
+}
+
+func (m *MockBlobStorage) ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error) {
+	return nil, nil
+}
+
 func (m *MockBlobStorage) GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error) {
 	var totals domain.GroupTotals
 	if topics, ok := m.Files[groupID]; ok {

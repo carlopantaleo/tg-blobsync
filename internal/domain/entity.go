@@ -1,11 +1,67 @@
 package domain
 
+const (
+	// EmptyFileFlag marks an empty file stored as a one-byte Telegram document.
+	EmptyFileFlag = "EMPTY_FILE"
+	// IndexFlag marks a Telegram message containing a topic metadata index.
+	IndexFlag = "INDEX"
+)
+
 // FileMeta represents the metadata stored in the caption of the Telegram message.
 type FileMeta struct {
 	Path     string `json:"p"`
 	Checksum string `json:"m,omitempty"`
 	ModTime  int64  `json:"t,omitempty"`
 	Flags    string `json:"f,omitempty"`
+}
+
+// FileIndexEntry represents a remote file in a topic metadata index.
+type FileIndexEntry struct {
+	Path      string `json:"p"`
+	Checksum  string `json:"m,omitempty"`
+	ModTime   int64  `json:"t,omitempty"`
+	Flags     string `json:"f,omitempty"`
+	Size      int64  `json:"s"`
+	MessageID int    `json:"id"`
+}
+
+// FileIndex represents the metadata index stored in the most recent topic message.
+type FileIndex struct {
+	Entries []FileIndexEntry `json:"entries"`
+}
+
+// NewFileIndex creates an index containing the supplied remote files.
+func NewFileIndex(files []RemoteFile) FileIndex {
+	entries := make([]FileIndexEntry, len(files))
+	for i, file := range files {
+		entries[i] = FileIndexEntry{
+			Path:      file.Meta.Path,
+			Checksum:  file.Meta.Checksum,
+			ModTime:   file.Meta.ModTime,
+			Flags:     file.Meta.Flags,
+			Size:      file.Size,
+			MessageID: file.MessageID,
+		}
+	}
+	return FileIndex{Entries: entries}
+}
+
+// RemoteFiles returns the remote files represented by the index.
+func (i FileIndex) RemoteFiles() []RemoteFile {
+	files := make([]RemoteFile, len(i.Entries))
+	for j, entry := range i.Entries {
+		files[j] = RemoteFile{
+			Meta: FileMeta{
+				Path:     entry.Path,
+				Checksum: entry.Checksum,
+				ModTime:  entry.ModTime,
+				Flags:    entry.Flags,
+			},
+			MessageID: entry.MessageID,
+			Size:      entry.Size,
+		}
+	}
+	return files
 }
 
 // GroupTotals contains aggregated information for a group.

@@ -290,7 +290,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 			ModTime:  file.ModTime,
 		}
 		if file.Size == 0 {
-			meta.Flags = "EMPTY_FILE"
+			meta.Flags = domain.EmptyFileFlag
 		}
 		captionBytes, err := json.Marshal(meta)
 		if err != nil {
