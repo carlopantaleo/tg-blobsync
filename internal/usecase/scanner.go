@@ -11,13 +11,15 @@ import (
 type FileScanner interface {
 	ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 	ScanRemote(ctx context.Context, groupID, topicID int64) (map[string]domain.RemoteFile, error)
+	RemoteIndexMessageID() int
 }
 
 type scanner struct {
-	fs      domain.FileSystem
-	storage domain.BlobStorage
-	subDir  string
-	skipMD5 bool
+	fs             domain.FileSystem
+	storage        domain.BlobStorage
+	subDir         string
+	skipMD5        bool
+	indexMessageID int
 }
 
 func NewScanner(fs domain.FileSystem, storage domain.BlobStorage, subDir string, skipMD5 bool) FileScanner {
@@ -55,11 +57,12 @@ func (s *scanner) ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 }
 
 func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[string]domain.RemoteFile, error) {
-	index, _, indexed, err := s.storage.GetIndex(ctx, groupID, topicID)
+	index, indexMessageID, indexed, err := s.storage.GetIndex(ctx, groupID, topicID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read remote index: %w", err)
 	}
 	if indexed {
+		s.indexMessageID = indexMessageID
 		return s.remoteMap(index.RemoteFiles()), nil
 	}
 
@@ -76,10 +79,15 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 			return nil, fmt.Errorf("failed to delete stale index %d: %w", messageID, err)
 		}
 	}
-	if _, err := s.storage.UploadIndex(ctx, groupID, topicID, domain.NewFileIndex(files)); err != nil {
+	s.indexMessageID, err = s.storage.UploadIndex(ctx, groupID, topicID, domain.NewFileIndex(files))
+	if err != nil {
 		return nil, fmt.Errorf("failed to migrate remote index: %w", err)
 	}
 	return s.remoteMap(files), nil
+}
+
+func (s *scanner) RemoteIndexMessageID() int {
+	return s.indexMessageID
 }
 
 func (s *scanner) remoteMap(files []domain.RemoteFile) map[string]domain.RemoteFile {

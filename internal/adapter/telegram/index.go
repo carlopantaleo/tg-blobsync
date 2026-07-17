@@ -13,6 +13,8 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+const indexCaption = `{"f":"INDEX"}`
+
 // GetIndex returns the topic index when it is stored in the most recent message.
 func (t *TelegramClient) GetIndex(ctx context.Context, groupID int64, topicID int64) (*domain.FileIndex, int, bool, error) {
 	message, err := t.getLatestTopicMessage(ctx, groupID, topicID)
@@ -64,7 +66,7 @@ func (t *TelegramClient) UploadIndex(ctx context.Context, groupID int64, topicID
 
 	accessHash, _ := t.getAccessHash(groupID)
 	peer := &tg.InputPeerChannel{ChannelID: groupID, AccessHash: accessHash}
-	sent, err := t.sender.To(peer).Reply(int(topicID)).Media(ctx, message.UploadedDocument(file, styling.Plain(`{"f":"INDEX"}`)).MIME("application/json").Filename("index.json"))
+	sent, err := t.sender.To(peer).Reply(int(topicID)).Media(ctx, message.UploadedDocument(file, styling.Plain(indexCaption)).MIME("application/json").Filename("index.json"))
 	if err != nil {
 		return 0, fmt.Errorf("send topic index message: %w", err)
 	}

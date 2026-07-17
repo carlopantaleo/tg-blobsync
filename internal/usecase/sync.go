@@ -71,7 +71,7 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 		return err
 	}
 	if plan.Summary.Total > 0 {
-		return s.rebuildIndex(ctx, groupID, topicID)
+		return s.rebuildIndex(ctx, groupID, topicID, scanner.RemoteIndexMessageID())
 	}
 	return nil
 }
@@ -113,12 +113,12 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 		return err
 	}
 	if plan.Summary.Total > 0 {
-		return s.rebuildIndex(ctx, groupID, topicID)
+		return s.rebuildIndex(ctx, groupID, topicID, scanner.RemoteIndexMessageID())
 	}
 	return nil
 }
 
-func (s *Synchronizer) rebuildIndex(ctx context.Context, groupID, topicID int64) error {
+func (s *Synchronizer) rebuildIndex(ctx context.Context, groupID, topicID int64, currentIndexID int) error {
 	files, err := s.storage.ListFiles(ctx, groupID, topicID)
 	if err != nil {
 		return fmt.Errorf("failed to list files for index rebuild: %w", err)
@@ -127,7 +127,15 @@ func (s *Synchronizer) rebuildIndex(ctx context.Context, groupID, topicID int64)
 	if err != nil {
 		return fmt.Errorf("failed to list indexes for rebuild: %w", err)
 	}
+	if currentIndexID != 0 {
+		indexIDs = append(indexIDs, currentIndexID)
+	}
+	seen := make(map[int]struct{})
 	for _, messageID := range indexIDs {
+		if _, exists := seen[messageID]; exists {
+			continue
+		}
+		seen[messageID] = struct{}{}
 		if err := s.storage.DeleteFile(ctx, groupID, topicID, messageID); err != nil {
 			return fmt.Errorf("failed to delete old index %d: %w", messageID, err)
 		}

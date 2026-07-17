@@ -6,6 +6,20 @@ import (
 	"tg-blobsync/internal/domain"
 )
 
+func TestBrowser_ListAndBrowseUsesIndexMessageID(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	mockStorage.Indexes[100] = map[int64]*domain.FileIndex{200: {Entries: []domain.FileIndexEntry{{Path: "indexed.txt", MessageID: 88}}}}
+	mockStorage.IndexIDs[100] = map[int64]int{200: 90}
+	mockUI := &MockBrowseUI{}
+
+	if err := NewBrowser(mockStorage, mockUI).ListAndBrowse(context.Background(), 100, 200); err != nil {
+		t.Fatalf("ListAndBrowse failed: %v", err)
+	}
+	if len(mockUI.Files) != 1 || mockUI.Files[0].MessageID != 88 {
+		t.Fatalf("browse files = %#v, want message ID 88", mockUI.Files)
+	}
+}
+
 func TestBrowser_ListAndBrowse(t *testing.T) {
 	mockStorage := NewMockBlobStorage()
 	mockUI := &MockBrowseUI{}

@@ -60,6 +60,12 @@ func TestGetIndexReturnsAbsentForEmptyTopic(t *testing.T) {
 	}
 }
 
+func TestIndexCaption(t *testing.T) {
+	if indexCaption != `{"f":"INDEX"}` {
+		t.Fatalf("index caption = %q, want exact marker", indexCaption)
+	}
+}
+
 func TestIsIndexMessage(t *testing.T) {
 	if !isIndexMessage(&tg.Message{Message: `{"f":"INDEX"}`}) {
 		t.Fatal("expected INDEX marker to be recognized")

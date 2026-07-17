@@ -78,6 +78,27 @@ func TestScanner_ScanRemoteMigratesLegacyTopic(t *testing.T) {
 	if len(files) != 1 || mockStorage.Indexes[groupID][topicID] == nil {
 		t.Fatalf("legacy scan did not migrate index: files=%#v indexes=%#v", files, mockStorage.Indexes)
 	}
+
+	files, err = scanner.ScanRemote(context.Background(), groupID, topicID)
+	if err != nil {
+		t.Fatalf("indexed ScanRemote failed: %v", err)
+	}
+	if len(files) != 1 || files["file.txt"].MessageID != 3 {
+		t.Fatalf("indexed scan returned %#v, want migrated file", files)
+	}
+}
+
+func TestScanner_ScanRemoteRemovesStaleIndexes(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	mockStorage.Files[1] = map[int64][]domain.RemoteFile{2: {{Meta: domain.FileMeta{Path: "file.txt"}, MessageID: 3}}}
+	mockStorage.StaleIndexIDs[1] = map[int64][]int{2: {10, 11}}
+
+	if _, err := NewScanner(NewMockFileSystem(), mockStorage, "", false).ScanRemote(context.Background(), 1, 2); err != nil {
+		t.Fatalf("ScanRemote failed: %v", err)
+	}
+	if len(mockStorage.DeletedIDs) != 2 || mockStorage.IndexUploads != 1 {
+		t.Fatalf("deleted IDs=%v uploads=%d, want stale cleanup and migration", mockStorage.DeletedIDs, mockStorage.IndexUploads)
+	}
 }
 
 func TestScanner_ScanRemote(t *testing.T) {
