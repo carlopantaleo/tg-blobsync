@@ -137,10 +137,7 @@ func (t *TelegramClient) GroupTotals(ctx context.Context, groupID int64) (domain
 			return totals, err
 		}
 		if indexed {
-			totals.Files += len(index.Entries)
-			for _, entry := range index.Entries {
-				totals.TotalSize += entry.Size
-			}
+			addIndexTotals(&totals, *index)
 			continue
 		}
 		files, err := t.ListFiles(ctx, groupID, topic.ID)
@@ -202,6 +199,13 @@ func (t *TelegramClient) parseMessageToFile(msg tg.MessageClass, topicID int64) 
 		}
 	}
 	return domain.RemoteFile{}, false
+}
+
+func addIndexTotals(totals *domain.GroupTotals, index domain.FileIndex) {
+	totals.Files += len(index.Entries)
+	for _, entry := range index.Entries {
+		totals.TotalSize += entry.Size
+	}
 }
 
 // UploadFile uploads a file to the topic with progress reporting.
