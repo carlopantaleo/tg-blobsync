@@ -53,10 +53,26 @@
 - [x] 9.2 Ensure single-file download uses the `messageID` from the index entry
 - [x] 9.3 Write TDD tests for browse with index present and with fallback
 
+## 9b. Browse — prompt for index creation when absent
+
+- [x] 9b.1 Extract migration logic (legacy ListFiles + delete stale indexes + upload new index) from `scanner.ScanRemote` into a reusable `MigrateTopicIndex` function in the usecase package
+- [x] 9b.2 Add `ConfirmCreateIndex(message string) (bool, error)` to the `BrowseUI` interface
+- [x] 9b.3 Update `browser.ListAndBrowse`: when index is absent, prompt the user via `ConfirmCreateIndex`; if confirmed, call `MigrateTopicIndex` and build the file list from the new index; if declined, fall back to legacy `ListFiles`
+- [x] 9b.4 Implement `ConfirmCreateIndex` in the TUI/console adapter
+- [x] 9b.5 Write TDD tests: browse with absent index and user confirms → migration runs and file list comes from the new index; browse with absent index and user declines → legacy `ListFiles` is used, no migration
+
 ## 10. GroupTotals — use the index
 
 - [x] 10.1 Update `GroupTotals` to sum file count and total size from each topic's index; for topics without an index, fall back to paginating that topic only
 - [x] 10.2 Write TDD tests for `GroupTotals` with mixed indexed/non-indexed topics
+
+## 10b. GroupTotals — prompt for index creation when some topics lack an index
+
+- [x] 10b.1 Create a `GroupTotalsUseCase` in the usecase package that takes `BlobStorage` + a `TotalsUI` interface (with `ConfirmCreateIndex` and `ShowGroupTotals` methods)
+- [x] 10b.2 The usecase SHALL list topics, check which have indexes, prompt once if any lack an index, migrate those if confirmed, then compute totals from indexes (and legacy fallback for any remaining non-indexed topics)
+- [x] 10b.3 Add `ConfirmCreateIndex` to the `selectionUI` interface in `cmd/tgblobsync/main.go` and implement it in `ConsoleUI`
+- [x] 10b.4 Update `main.go` to call the new `GroupTotalsUseCase` instead of `storage.GroupTotals` directly
+- [x] 10b.5 Write TDD tests: all topics indexed → no prompt; some topics lack index and user confirms → migration runs for those topics; some topics lack index and user declines → legacy fallback for those topics
 
 ## 11. End-to-end and validation
 

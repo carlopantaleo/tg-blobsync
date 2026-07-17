@@ -20,6 +20,44 @@ func TestBrowser_ListAndBrowseUsesIndexMessageID(t *testing.T) {
 	}
 }
 
+func TestBrowser_ListAndBrowsePromptsAndMigratesWhenIndexAbsent(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	mockStorage.Files[100] = map[int64][]domain.RemoteFile{200: {{Meta: domain.FileMeta{Path: "file.txt"}, MessageID: 5}}}
+	mockUI := &MockBrowseUI{ConfirmIndex: true}
+
+	if err := NewBrowser(mockStorage, mockUI).ListAndBrowse(context.Background(), 100, 200); err != nil {
+		t.Fatalf("ListAndBrowse failed: %v", err)
+	}
+	if !mockUI.ConfirmCalled {
+		t.Fatal("expected ConfirmCreateIndex to be called")
+	}
+	if mockStorage.IndexUploads != 1 {
+		t.Fatalf("index uploads = %d, want 1 (migration)", mockStorage.IndexUploads)
+	}
+	if len(mockUI.Files) != 1 || mockUI.Files[0].Meta.Path != "file.txt" {
+		t.Fatalf("browse files = %#v, want migrated file", mockUI.Files)
+	}
+}
+
+func TestBrowser_ListAndBrowseDeclineUsesLegacyListFiles(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	mockStorage.Files[100] = map[int64][]domain.RemoteFile{200: {{Meta: domain.FileMeta{Path: "file.txt"}, MessageID: 5}}}
+	mockUI := &MockBrowseUI{ConfirmIndex: false}
+
+	if err := NewBrowser(mockStorage, mockUI).ListAndBrowse(context.Background(), 100, 200); err != nil {
+		t.Fatalf("ListAndBrowse failed: %v", err)
+	}
+	if !mockUI.ConfirmCalled {
+		t.Fatal("expected ConfirmCreateIndex to be called")
+	}
+	if mockStorage.IndexUploads != 0 {
+		t.Fatalf("index uploads = %d, want 0 (declined)", mockStorage.IndexUploads)
+	}
+	if len(mockUI.Files) != 1 || mockUI.Files[0].Meta.Path != "file.txt" {
+		t.Fatalf("browse files = %#v, want legacy file", mockUI.Files)
+	}
+}
+
 func TestBrowser_ListAndBrowse(t *testing.T) {
 	mockStorage := NewMockBlobStorage()
 	mockUI := &MockBrowseUI{}

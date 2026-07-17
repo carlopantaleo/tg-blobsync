@@ -66,22 +66,13 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 		return s.remoteMap(index.RemoteFiles()), nil
 	}
 
+	s.indexMessageID, err = MigrateTopicIndex(ctx, s.storage, groupID, topicID)
+	if err != nil {
+		return nil, err
+	}
 	files, err := s.storage.ListFiles(ctx, groupID, topicID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list remote files: %w", err)
-	}
-	staleIndexes, err := s.storage.ListIndexMessageIDs(ctx, groupID, topicID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list stale indexes: %w", err)
-	}
-	for _, messageID := range staleIndexes {
-		if err := s.storage.DeleteFile(ctx, groupID, topicID, messageID); err != nil {
-			return nil, fmt.Errorf("failed to delete stale index %d: %w", messageID, err)
-		}
-	}
-	s.indexMessageID, err = s.storage.UploadIndex(ctx, groupID, topicID, domain.NewFileIndex(files))
-	if err != nil {
-		return nil, fmt.Errorf("failed to migrate remote index: %w", err)
+		return nil, fmt.Errorf("failed to list remote files after migration: %w", err)
 	}
 	return s.remoteMap(files), nil
 }

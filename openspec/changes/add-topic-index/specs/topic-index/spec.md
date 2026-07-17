@@ -28,10 +28,22 @@ The system SHALL recover the remote state of a topic from the index when the las
 - **THEN** the system SHALL build the browsable file list from the index
 - **AND** single-file download SHALL use the `messageID` stored in the corresponding index entry
 
+#### Scenario: Browse prompts for index creation when absent
+- **WHEN** the `browse` command lists files in a topic whose last message is not the INDEX
+- **THEN** the system SHALL prompt the user asking whether to create the topic index
+- **AND** if the user confirms, the system SHALL run the legacy fallback migration (paginate, delete stale indexes, upload new index) and then build the browsable file list from the new index
+- **AND** if the user declines, the system SHALL fall back to the legacy `ListFiles` pagination without creating an index
+
 #### Scenario: Index used by group totals
 - **WHEN** `GroupTotals` is computed for a group
 - **THEN** the system SHALL sum the file count and total size from the index of each topic that has one
 - **AND** for any topic without an index the system SHALL fall back to paginating that topic's messages
+
+#### Scenario: Group totals prompts for index creation when some topics lack an index
+- **WHEN** `GroupTotals` is computed for a group and one or more topics do not have an index
+- **THEN** the system SHALL prompt the user once asking whether to create indexes for all topics without one
+- **AND** if the user confirms, the system SHALL run the legacy fallback migration for each topic without an index before computing totals
+- **AND** if the user declines, the system SHALL compute totals for those topics using the legacy `ListFiles` pagination
 
 ### Requirement: Legacy fallback and automatic migration
 The system SHALL fall back to the legacy pagination flow when the last message of the topic is not the INDEX message. During the fallback, the system SHALL delete any stale INDEX messages found in the topic and SHALL create a fresh INDEX message as the last message of the topic before proceeding with synchronization.

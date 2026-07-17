@@ -221,10 +221,17 @@ func (m *MockTask) Abort()                   {}
 
 // MockBrowseUI
 type MockBrowseUI struct {
-	Files []domain.RemoteFile
+	Files         []domain.RemoteFile
+	ConfirmIndex  bool
+	ConfirmCalled bool
 }
 
 func (m *MockBrowseUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) {
 	m.Files = files
 	return nil, nil
+}
+
+func (m *MockBrowseUI) ConfirmCreateIndex(message string) (bool, error) {
+	m.ConfirmCalled = true
+	return m.ConfirmIndex, nil
 }
