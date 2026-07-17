@@ -57,6 +57,8 @@ func (m *MockFileSystem) EnsureDir(path string) error {
 // MockBlobStorage
 type MockBlobStorage struct {
 	Files       map[int64]map[int64][]domain.RemoteFile
+	Indexes     map[int64]map[int64]*domain.FileIndex
+	IndexIDs    map[int64]map[int64]int
 	Groups      []domain.Group
 	Topics      map[int64][]domain.Topic
 	LastDeleted struct {
@@ -68,9 +70,11 @@ type MockBlobStorage struct {
 
 func NewMockBlobStorage() *MockBlobStorage {
 	return &MockBlobStorage{
-		Files:  make(map[int64]map[int64][]domain.RemoteFile),
-		Groups: []domain.Group{},
-		Topics: make(map[int64][]domain.Topic),
+		Files:    make(map[int64]map[int64][]domain.RemoteFile),
+		Indexes:  make(map[int64]map[int64]*domain.FileIndex),
+		IndexIDs: make(map[int64]map[int64]int),
+		Groups:   []domain.Group{},
+		Topics:   make(map[int64][]domain.Topic),
 	}
 }
 
@@ -98,14 +102,33 @@ func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID 
 }
 
 func (m *MockBlobStorage) GetIndex(ctx context.Context, groupID int64, topicID int64) (*domain.FileIndex, int, bool, error) {
+	if groupIndexes, ok := m.Indexes[groupID]; ok {
+		if index, ok := groupIndexes[topicID]; ok {
+			return index, m.IndexIDs[groupID][topicID], true, nil
+		}
+	}
 	return nil, 0, false, nil
 }
 
 func (m *MockBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicID int64, index domain.FileIndex) (int, error) {
-	return 0, nil
+	if m.Indexes[groupID] == nil {
+		m.Indexes[groupID] = make(map[int64]*domain.FileIndex)
+		m.IndexIDs[groupID] = make(map[int64]int)
+	}
+	messageID := len(m.Indexes[groupID]) + 1
+	m.Indexes[groupID][topicID] = &index
+	m.IndexIDs[groupID][topicID] = messageID
+	return messageID, nil
 }
 
 func (m *MockBlobStorage) ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error) {
+	_, messageID, ok, err := m.GetIndex(ctx, groupID, topicID)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return []int{messageID}, nil
+	}
 	return nil, nil
 }
 

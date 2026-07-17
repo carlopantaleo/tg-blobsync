@@ -1,20 +1,20 @@
 ## 1. Domain model
 
-- [ ] 1.1 Add `FileIndexEntry` and `FileIndex` structs to `internal/domain/entity.go` (fields: Path, Checksum, ModTime, Flags, Size, MessageID)
-- [ ] 1.2 Add the `INDEX` flag constant alongside the existing `EMPTY_FILE` usage
-- [ ] 1.3 Write unit tests for `FileIndex` (de)serialization round-trip
+- [x] 1.1 Add `FileIndexEntry` and `FileIndex` structs to `internal/domain/entity.go` (fields: Path, Checksum, ModTime, Flags, Size, MessageID)
+- [x] 1.2 Add the `INDEX` flag constant alongside the existing `EMPTY_FILE` usage
+- [x] 1.3 Write unit tests for `FileIndex` (de)serialization round-trip
 
 ## 2. BlobStorage interface
 
-- [ ] 2.1 Add `GetIndex(ctx, groupID, topicID) (*FileIndex, int, bool, error)` to the `BlobStorage` interface in `internal/domain/repository.go`
-- [ ] 2.2 Add `UploadIndex(ctx, groupID, topicID, index FileIndex) (int, error)` to the `BlobStorage` interface
-- [ ] 2.3 Update all `BlobStorage` mocks/fakes in tests to implement the new methods
+- [x] 2.1 Add `GetIndex(ctx, groupID, topicID) (*FileIndex, int, bool, error)` to the `BlobStorage` interface in `internal/domain/repository.go`
+- [x] 2.2 Add `UploadIndex(ctx, groupID, topicID, index FileIndex) (int, error)` to the `BlobStorage` interface
+- [x] 2.3 Update all `BlobStorage` mocks/fakes in tests to implement the new methods
 
 ## 3. Telegram adapter — index read
 
-- [ ] 3.1 Implement `GetIndex`: fetch the last message of the topic (`MessagesGetReplies` with `limit=1`), detect the `{"f":"INDEX"}` caption, download `index.json`, unmarshal into `FileIndex`
-- [ ] 3.2 Write TDD tests for `GetIndex`: index present, index absent (last message is a file), empty topic, malformed index document
-- [ ] 3.3 Ensure `parseMessageToFile` skips messages whose caption parses to `Flags == "INDEX"` (they are not files)
+- [x] 3.1 Implement `GetIndex`: fetch the last message of the topic (`MessagesGetReplies` with `limit=1`), detect the `{"f":"INDEX"}` caption, download `index.json`, unmarshal into `FileIndex`
+- [x] 3.2 Write TDD tests for `GetIndex`: index present, index absent (last message is a file), empty topic, malformed index document
+- [x] 3.3 Ensure `parseMessageToFile` skips messages whose caption parses to `Flags == "INDEX"` (they are not files)
 
 ## 4. Telegram adapter — index write
 

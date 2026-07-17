@@ -67,7 +67,13 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
 	executor.SetSubDir(s.subDir)
-	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
+	if err := executor.Execute(ctx, plan, rootDir, groupID, topicID); err != nil {
+		return err
+	}
+	if plan.Summary.Total > 0 {
+		return s.rebuildIndex(ctx, groupID, topicID)
+	}
+	return nil
 }
 
 func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicID int64) error {
@@ -103,7 +109,33 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
 	executor.SetSubDir(s.subDir)
-	return executor.Execute(ctx, plan, rootDir, groupID, topicID)
+	if err := executor.Execute(ctx, plan, rootDir, groupID, topicID); err != nil {
+		return err
+	}
+	if plan.Summary.Total > 0 {
+		return s.rebuildIndex(ctx, groupID, topicID)
+	}
+	return nil
+}
+
+func (s *Synchronizer) rebuildIndex(ctx context.Context, groupID, topicID int64) error {
+	files, err := s.storage.ListFiles(ctx, groupID, topicID)
+	if err != nil {
+		return fmt.Errorf("failed to list files for index rebuild: %w", err)
+	}
+	indexIDs, err := s.storage.ListIndexMessageIDs(ctx, groupID, topicID)
+	if err != nil {
+		return fmt.Errorf("failed to list indexes for rebuild: %w", err)
+	}
+	for _, messageID := range indexIDs {
+		if err := s.storage.DeleteFile(ctx, groupID, topicID, messageID); err != nil {
+			return fmt.Errorf("failed to delete old index %d: %w", messageID, err)
+		}
+	}
+	if _, err := s.storage.UploadIndex(ctx, groupID, topicID, domain.NewFileIndex(files)); err != nil {
+		return fmt.Errorf("failed to upload rebuilt index: %w", err)
+	}
+	return nil
 }
 
 func formatSize(b int64) string {

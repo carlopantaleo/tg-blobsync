@@ -124,59 +124,34 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 	return files, nil
 }
 
-// GroupTotals returns the aggregated number of files and total size for the group using Takeout API immediately.
+// GroupTotals returns aggregate file count and size, using topic indexes when available.
 func (t *TelegramClient) GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error) {
-	accessHash, _ := t.getAccessHash(groupID)
-	inputPeer := &tg.InputPeerChannel{ChannelID: groupID, AccessHash: accessHash}
-
-	takeout, err := t.api.AccountInitTakeoutSession(ctx, &tg.AccountInitTakeoutSessionRequest{
-		Flags: 1 << 0, // messages
-	})
+	topics, err := t.ListTopics(ctx, groupID)
 	if err != nil {
 		return domain.GroupTotals{}, err
 	}
-
-	defer func() {
-		_, _ = t.api.AccountFinishTakeoutSession(ctx, &tg.AccountFinishTakeoutSessionRequest{Success: true})
-	}()
-
-	limit := 100
-	offsetID := 0
 	var totals domain.GroupTotals
-
-	for {
-		var history tg.MessagesChannelMessages
-		err := t.invoker.Invoke(ctx, &tg.InvokeWithTakeoutRequest{
-			TakeoutID: takeout.ID,
-			Query: &tg.MessagesGetHistoryRequest{
-				Peer:     inputPeer,
-				OffsetID: offsetID,
-				Limit:    limit,
-			},
-		}, &history)
+	for _, topic := range topics {
+		index, _, indexed, err := t.GetIndex(ctx, groupID, topic.ID)
 		if err != nil {
 			return totals, err
 		}
-
-		messages := history.Messages
-		if len(messages) == 0 {
-			break
-		}
-
-		for _, msg := range messages {
-			if file, ok := t.parseMessageToFile(msg, 0); ok {
-				totals.Files++
-				totals.TotalSize += file.Size
+		if indexed {
+			totals.Files += len(index.Entries)
+			for _, entry := range index.Entries {
+				totals.TotalSize += entry.Size
 			}
+			continue
 		}
-
-		lastMsg := messages[len(messages)-1]
-		if lastMsg.GetID() >= offsetID && offsetID != 0 {
-			break
+		files, err := t.ListFiles(ctx, groupID, topic.ID)
+		if err != nil {
+			return totals, err
 		}
-		offsetID = lastMsg.GetID()
+		for _, file := range files {
+			totals.Files++
+			totals.TotalSize += file.Size
+		}
 	}
-
 	return totals, nil
 }
 
@@ -214,6 +189,9 @@ func (t *TelegramClient) parseMessageToFile(msg tg.MessageClass, topicID int64) 
 							size = d.Size
 						}
 					}
+				}
+				if meta.Flags == domain.EmptyFileFlag {
+					size = 0
 				}
 				return domain.RemoteFile{
 					Meta:      meta,

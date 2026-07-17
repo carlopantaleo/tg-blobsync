@@ -29,9 +29,18 @@ func NewBrowser(storage domain.BlobStorage, ui BrowseUI) FileBrowser {
 
 func (b *browser) ListAndBrowse(ctx context.Context, groupID, topicID int64) error {
 	for {
-		files, err := b.storage.ListFiles(ctx, groupID, topicID)
+		index, _, indexed, err := b.storage.GetIndex(ctx, groupID, topicID)
 		if err != nil {
-			return fmt.Errorf("failed to list files: %w", err)
+			return fmt.Errorf("failed to read index: %w", err)
+		}
+		var files []domain.RemoteFile
+		if indexed {
+			files = index.RemoteFiles()
+		} else {
+			files, err = b.storage.ListFiles(ctx, groupID, topicID)
+			if err != nil {
+				return fmt.Errorf("failed to list files: %w", err)
+			}
 		}
 
 		if len(files) == 0 {

@@ -42,6 +42,44 @@ func TestScanner_ScanLocal(t *testing.T) {
 	}
 }
 
+func TestScanner_ScanRemoteUsesIndex(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	groupID := int64(1)
+	topicID := int64(2)
+	mockStorage.Indexes[groupID] = map[int64]*domain.FileIndex{
+		topicID: {Entries: []domain.FileIndexEntry{{Path: "remote-sub/file.txt", Size: 12, MessageID: 7}}},
+	}
+	mockStorage.IndexIDs[groupID] = map[int64]int{topicID: 9}
+
+	scanner := NewScanner(NewMockFileSystem(), mockStorage, "remote-sub", false)
+	files, err := scanner.ScanRemote(context.Background(), groupID, topicID)
+	if err != nil {
+		t.Fatalf("ScanRemote failed: %v", err)
+	}
+	file, ok := files["file.txt"]
+	if !ok || file.MessageID != 7 || file.Size != 12 {
+		t.Fatalf("indexed file = %#v, want message 7 and size 12", file)
+	}
+}
+
+func TestScanner_ScanRemoteMigratesLegacyTopic(t *testing.T) {
+	mockStorage := NewMockBlobStorage()
+	groupID := int64(1)
+	topicID := int64(2)
+	mockStorage.Files[groupID] = map[int64][]domain.RemoteFile{
+		topicID: {{Meta: domain.FileMeta{Path: "file.txt"}, MessageID: 3, Size: 12}},
+	}
+
+	scanner := NewScanner(NewMockFileSystem(), mockStorage, "", false)
+	files, err := scanner.ScanRemote(context.Background(), groupID, topicID)
+	if err != nil {
+		t.Fatalf("ScanRemote failed: %v", err)
+	}
+	if len(files) != 1 || mockStorage.Indexes[groupID][topicID] == nil {
+		t.Fatalf("legacy scan did not migrate index: files=%#v indexes=%#v", files, mockStorage.Indexes)
+	}
+}
+
 func TestScanner_ScanRemote(t *testing.T) {
 	mockStorage := NewMockBlobStorage()
 	groupID := int64(1)
