@@ -99,16 +99,16 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 		return err
 	}
 
-	if e.ui != nil {
-		e.ui.Wait()
-		_ = e.ui.WaitForInput("Sync completed.")
-	}
-
 	// Execute Deletions
 	for _, item := range deleteTasks {
 		if err := e.processItem(ctx, item, rootDir, groupID, topicID); err != nil {
 			log.Printf("Error processing delete for %s: %v", item.Path, err)
 		}
+	}
+
+	if e.ui != nil {
+		e.ui.Wait()
+		_ = e.ui.WaitForInput("Sync completed.")
 	}
 
 	return nil
