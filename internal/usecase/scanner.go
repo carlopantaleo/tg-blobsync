@@ -11,13 +11,15 @@ import (
 type FileScanner interface {
 	ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 	ScanRemote(ctx context.Context, groupID, topicID int64) (map[string]domain.RemoteFile, error)
+	RemoteIndexMessageID() int
 }
 
 type scanner struct {
-	fs      domain.FileSystem
-	storage domain.BlobStorage
-	subDir  string
-	skipMD5 bool
+	fs             domain.FileSystem
+	storage        domain.BlobStorage
+	subDir         string
+	skipMD5        bool
+	indexMessageID int
 }
 
 func NewScanner(fs domain.FileSystem, storage domain.BlobStorage, subDir string, skipMD5 bool) FileScanner {
@@ -55,11 +57,31 @@ func (s *scanner) ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 }
 
 func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[string]domain.RemoteFile, error) {
-	files, err := s.storage.ListFiles(ctx, groupID, topicID)
+	index, indexMessageID, indexed, err := s.storage.GetIndex(ctx, groupID, topicID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list remote files: %w", err)
+		return nil, fmt.Errorf("failed to read remote index: %w", err)
+	}
+	if indexed {
+		s.indexMessageID = indexMessageID
+		return s.remoteMap(index.RemoteFiles()), nil
 	}
 
+	s.indexMessageID, err = MigrateTopicIndex(ctx, s.storage, groupID, topicID)
+	if err != nil {
+		return nil, err
+	}
+	files, err := s.storage.ListFiles(ctx, groupID, topicID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remote files after migration: %w", err)
+	}
+	return s.remoteMap(files), nil
+}
+
+func (s *scanner) RemoteIndexMessageID() int {
+	return s.indexMessageID
+}
+
+func (s *scanner) remoteMap(files []domain.RemoteFile) map[string]domain.RemoteFile {
 	result := make(map[string]domain.RemoteFile)
 	for _, f := range files {
 		path := filepath.ToSlash(f.Meta.Path)
@@ -67,20 +89,15 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 			if !strings.HasPrefix(path, s.subDir+"/") && path != s.subDir {
 				continue
 			}
-			// Map remote path to a relative path starting from subDir.
-			// e.g. remote "subdir/file.txt" with subDir "subdir" becomes "file.txt"
 			if path == s.subDir {
-				// This shouldn't happen for files if subDir is a directory,
-				// but let's be safe.
 				path = filepath.Base(path)
 			} else {
 				path = strings.TrimPrefix(path, s.subDir+"/")
 			}
 		}
-		// Dedup: keep first (newest)
 		if _, exists := result[path]; !exists {
 			result[path] = f
 		}
 	}
-	return result, nil
+	return result
 }

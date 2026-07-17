@@ -56,10 +56,15 @@ func (m *MockFileSystem) EnsureDir(path string) error {
 
 // MockBlobStorage
 type MockBlobStorage struct {
-	Files       map[int64]map[int64][]domain.RemoteFile
-	Groups      []domain.Group
-	Topics      map[int64][]domain.Topic
-	LastDeleted struct {
+	Files         map[int64]map[int64][]domain.RemoteFile
+	Indexes       map[int64]map[int64]*domain.FileIndex
+	IndexIDs      map[int64]map[int64]int
+	IndexUploads  int
+	StaleIndexIDs map[int64]map[int64][]int
+	DeletedIDs    []int
+	Groups        []domain.Group
+	Topics        map[int64][]domain.Topic
+	LastDeleted   struct {
 		GroupID   int64
 		TopicID   int64
 		MessageID int
@@ -68,9 +73,12 @@ type MockBlobStorage struct {
 
 func NewMockBlobStorage() *MockBlobStorage {
 	return &MockBlobStorage{
-		Files:  make(map[int64]map[int64][]domain.RemoteFile),
-		Groups: []domain.Group{},
-		Topics: make(map[int64][]domain.Topic),
+		Files:         make(map[int64]map[int64][]domain.RemoteFile),
+		Indexes:       make(map[int64]map[int64]*domain.FileIndex),
+		IndexIDs:      make(map[int64]map[int64]int),
+		StaleIndexIDs: make(map[int64]map[int64][]int),
+		Groups:        []domain.Group{},
+		Topics:        make(map[int64][]domain.Topic),
 	}
 }
 
@@ -95,6 +103,43 @@ func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID 
 		}
 	}
 	return []domain.RemoteFile{}, nil
+}
+
+func (m *MockBlobStorage) GetIndex(ctx context.Context, groupID int64, topicID int64) (*domain.FileIndex, int, bool, error) {
+	if groupIndexes, ok := m.Indexes[groupID]; ok {
+		if index, ok := groupIndexes[topicID]; ok {
+			return index, m.IndexIDs[groupID][topicID], true, nil
+		}
+	}
+	return nil, 0, false, nil
+}
+
+func (m *MockBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicID int64, index domain.FileIndex) (int, error) {
+	m.IndexUploads++
+	if m.Indexes[groupID] == nil {
+		m.Indexes[groupID] = make(map[int64]*domain.FileIndex)
+		m.IndexIDs[groupID] = make(map[int64]int)
+	}
+	messageID := len(m.Indexes[groupID]) + 1
+	m.Indexes[groupID][topicID] = &index
+	m.IndexIDs[groupID][topicID] = messageID
+	return messageID, nil
+}
+
+func (m *MockBlobStorage) ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error) {
+	if topics, ok := m.StaleIndexIDs[groupID]; ok {
+		if ids, ok := topics[topicID]; ok {
+			return ids, nil
+		}
+	}
+	_, messageID, ok, err := m.GetIndex(ctx, groupID, topicID)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return []int{messageID}, nil
+	}
+	return nil, nil
 }
 
 func (m *MockBlobStorage) GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error) {
@@ -127,6 +172,7 @@ func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID
 	m.LastDeleted.GroupID = groupID
 	m.LastDeleted.TopicID = topicID
 	m.LastDeleted.MessageID = messageID
+	m.DeletedIDs = append(m.DeletedIDs, messageID)
 	return nil
 }
 
@@ -175,10 +221,17 @@ func (m *MockTask) Abort()                   {}
 
 // MockBrowseUI
 type MockBrowseUI struct {
-	Files []domain.RemoteFile
+	Files         []domain.RemoteFile
+	ConfirmIndex  bool
+	ConfirmCalled bool
 }
 
 func (m *MockBrowseUI) BrowseFiles(files []domain.RemoteFile) (interface{}, error) {
 	m.Files = files
 	return nil, nil
+}
+
+func (m *MockBrowseUI) ConfirmCreateIndex(message string) (bool, error) {
+	m.ConfirmCalled = true
+	return m.ConfirmIndex, nil
 }

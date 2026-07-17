@@ -130,12 +130,7 @@ func (d *differ) DiffPull(local map[string]domain.LocalFile, remote map[string]d
 
 func (d *differ) shouldUpdate(local domain.LocalFile, remote domain.RemoteFile) bool {
 	if d.skipMD5 {
-		remoteSize := remote.Size
-		if remote.Meta.Flags == "EMPTY_FILE" {
-			remoteSize = 0
-		}
-		// Compare ModTime and Size
-		return remote.Meta.ModTime != local.ModTime || remoteSize != local.Size
+		return remote.Meta.ModTime != local.ModTime || remote.Size != local.Size
 	}
 	// Compare Checksum
 	return remote.Meta.Checksum != local.Checksum

@@ -115,6 +115,10 @@ When syncing:
 - **Large Files**: Files are uploaded in chunks. The tool automatically optimizes chunk size and uses multiple connections to saturate available bandwidth. Please note that files bigger than 2 GB are not supported by Telegram (4 GB for premium users).
 - **Session Management**: Securely stores Telegram sessions to avoid repeated logins.
 
+## Disclaimer
+
+This project has been partly developed using Artificial Intelligence and the OpenSpec framework.
+
 ## License
 
 MIT

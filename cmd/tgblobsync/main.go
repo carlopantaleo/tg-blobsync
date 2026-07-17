@@ -40,6 +40,7 @@ type selectionUI interface {
 	SelectTopic(topics []domain.Topic) (domain.Topic, error)
 	SelectSubDir(existingSubDirs []string) (string, error)
 	ShowGroupTotals(totals domain.GroupTotals) error
+	ConfirmCreateIndex(message string) (bool, error)
 }
 
 func main() {
@@ -104,7 +105,7 @@ func run() error {
 	tgClient.SetProgressTracker(console)
 
 restart_identifiers:
-	groupID, topicID, err := resolveIdentifiers(ctx, cfg, tgClient, console)
+	groupID, topicID, err := resolveIdentifiers(ctx, cfg, tgClient, tgClient, console)
 	if err != nil {
 		return err
 	}
@@ -139,9 +140,9 @@ restart_identifiers:
 	return err
 }
 
-func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, console selectionUI) (int64, int64, error) {
+func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, blobStorage domain.BlobStorage, console selectionUI) (int64, int64, error) {
 	for {
-		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 		if err != nil {
 			if err.Error() == "quitting" {
 				return 0, 0, err
@@ -158,7 +159,7 @@ func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage iden
 	}
 }
 
-func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, console selectionUI) (int64, int64, error) {
+func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, blobStorage domain.BlobStorage, console selectionUI) (int64, int64, error) {
 	var groupID int64
 	var topicID int64
 
@@ -224,7 +225,8 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 					return 0, 0, err
 				}
 				if err.Error() == "totals" {
-					totals, tErr := storage.GroupTotals(ctx, groupID)
+					totalsCalc := usecase.NewGroupTotalsCalculator(blobStorage, console)
+					totals, tErr := totalsCalc.Compute(ctx, groupID)
 					if tErr != nil {
 						return 0, 0, tErr
 					}

@@ -43,6 +43,40 @@ func (u *ConsoleUI) ShowGroupTotals(totals domain.GroupTotals) error {
 	return u.WaitForInput(message)
 }
 
+// ConfirmCreateIndex prompts the user to confirm whether to create a topic index.
+func (u *ConsoleUI) ConfirmCreateIndex(message string) (bool, error) {
+	if u.tuiProgram == nil {
+		return false, nil
+	}
+	for {
+		items := []list.Item{
+			listItem{title: "Yes, create index", value: "yes"},
+			listItem{title: "No, continue without index", value: "no"},
+		}
+		d := list.NewDefaultDelegate()
+		d.ShowDescription = false
+		d.SetHeight(1)
+		d.SetSpacing(0)
+		l := list.New(items, d, 0, 0)
+		l.Title = message
+
+		u.send(showListMsg{list: l})
+
+		res, ok := <-u.tuiModel.responseChan
+		if !ok {
+			return false, errors.New("quitting")
+		}
+		if item, ok := res.(listItem); ok {
+			switch item.value.(string) {
+			case "yes":
+				return true, nil
+			case "no":
+				return false, nil
+			}
+		}
+	}
+}
+
 // NewConsoleUI constructs an interactive console UI.
 func NewConsoleUI() *ConsoleUI {
 	ui := &ConsoleUI{originalLogOutput: log.Writer()}

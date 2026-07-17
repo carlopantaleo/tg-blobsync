@@ -35,6 +35,36 @@ func TestSynchronizer_Push(t *testing.T) {
 	// Also, if we set up mockStorage to fail Upload, we can verify error propagation.
 }
 
+func TestSynchronizer_PushRebuildsIndexAfterChanges(t *testing.T) {
+	mockFS := NewMockFileSystem()
+	mockFS.Files["file1.txt"] = domain.LocalFile{Path: "file1.txt", Size: 100}
+	mockStorage := NewMockBlobStorage()
+
+	sync := NewSynchronizer(mockFS, mockStorage, 1, &MockUserInterface{Confirmed: true}, false)
+	if err := sync.Push(context.Background(), "/tmp", 1, 2); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+	if mockStorage.IndexUploads != 2 {
+		t.Fatalf("index uploads = %d, want migration and post-sync rebuild", mockStorage.IndexUploads)
+	}
+}
+
+func TestSynchronizer_SkipsIndexRebuildWhenUpToDate(t *testing.T) {
+	mockFS := NewMockFileSystem()
+	mockFS.Files["file1.txt"] = domain.LocalFile{Path: "file1.txt", Size: 100, ModTime: 10}
+	mockStorage := NewMockBlobStorage()
+	mockStorage.Indexes[1] = map[int64]*domain.FileIndex{2: {Entries: []domain.FileIndexEntry{{Path: "file1.txt", Size: 100, ModTime: 10}}}}
+	mockStorage.IndexIDs[1] = map[int64]int{2: 10}
+
+	sync := NewSynchronizer(mockFS, mockStorage, 1, &MockUserInterface{Confirmed: true}, true)
+	if err := sync.Push(context.Background(), "/tmp", 1, 2); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+	if mockStorage.IndexUploads != 0 {
+		t.Fatalf("index uploads = %d, want 0 for no-op sync", mockStorage.IndexUploads)
+	}
+}
+
 func TestSynchronizer_Pull(t *testing.T) {
 	mockFS := NewMockFileSystem()
 	mockStorage := NewMockBlobStorage()

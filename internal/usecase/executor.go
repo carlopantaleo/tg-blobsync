@@ -99,16 +99,16 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 		return err
 	}
 
-	if e.ui != nil {
-		e.ui.Wait()
-		_ = e.ui.WaitForInput("Sync completed.")
-	}
-
 	// Execute Deletions
 	for _, item := range deleteTasks {
 		if err := e.processItem(ctx, item, rootDir, groupID, topicID); err != nil {
 			log.Printf("Error processing delete for %s: %v", item.Path, err)
 		}
+	}
+
+	if e.ui != nil {
+		e.ui.Wait()
+		_ = e.ui.WaitForInput("Sync completed.")
 	}
 
 	return nil
@@ -166,7 +166,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 	fullPath := filepath.Join(rootDir, item.Path)
 
 	operation := func() error {
-		if remoteFile.Meta.Flags == "EMPTY_FILE" {
+		if remoteFile.Meta.Flags == domain.EmptyFileFlag {
 			log.Printf("[*] Restoring empty file: %s", item.Path)
 			if err := e.fs.WriteFile(fullPath, strings.NewReader("")); err != nil {
 				return fmt.Errorf("error creating empty file %s: %w", item.Path, err)

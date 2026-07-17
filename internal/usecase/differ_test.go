@@ -5,6 +5,17 @@ import (
 	"tg-blobsync/internal/domain"
 )
 
+func TestDiffer_SkipMD5UsesNormalizedEmptyFileSize(t *testing.T) {
+	differ := NewDiffer(true)
+	local := map[string]domain.LocalFile{"empty.txt": {Path: "empty.txt", ModTime: 10, Size: 0}}
+	remote := map[string]domain.RemoteFile{"empty.txt": {Meta: domain.FileMeta{Path: "empty.txt", ModTime: 10, Flags: domain.EmptyFileFlag}, Size: 0}}
+
+	plan := differ.DiffPush(local, remote)
+	if plan.Summary.Total != 0 {
+		t.Fatalf("empty file plan total = %d, want 0", plan.Summary.Total)
+	}
+}
+
 func TestDiffer_DiffPush(t *testing.T) {
 	differ := NewDiffer(false) // MD5 check enabled
 

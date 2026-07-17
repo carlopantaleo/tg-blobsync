@@ -18,6 +18,7 @@ type browser struct {
 // BrowseUI defines the interface required by the browser use case for interaction
 type BrowseUI interface {
 	BrowseFiles(files []domain.RemoteFile) (interface{}, error)
+	ConfirmCreateIndex(message string) (bool, error)
 }
 
 func NewBrowser(storage domain.BlobStorage, ui BrowseUI) FileBrowser {
@@ -29,9 +30,33 @@ func NewBrowser(storage domain.BlobStorage, ui BrowseUI) FileBrowser {
 
 func (b *browser) ListAndBrowse(ctx context.Context, groupID, topicID int64) error {
 	for {
-		files, err := b.storage.ListFiles(ctx, groupID, topicID)
+		index, _, indexed, err := b.storage.GetIndex(ctx, groupID, topicID)
 		if err != nil {
-			return fmt.Errorf("failed to list files: %w", err)
+			return fmt.Errorf("failed to read index: %w", err)
+		}
+		var files []domain.RemoteFile
+		if indexed {
+			files = index.RemoteFiles()
+		} else {
+			confirmed, err := b.ui.ConfirmCreateIndex("Topic index not found. Create it now?")
+			if err != nil {
+				return err
+			}
+			if confirmed {
+				if _, err := MigrateTopicIndex(ctx, b.storage, groupID, topicID); err != nil {
+					return err
+				}
+				index, _, _, err = b.storage.GetIndex(ctx, groupID, topicID)
+				if err != nil {
+					return fmt.Errorf("failed to read new index: %w", err)
+				}
+				files = index.RemoteFiles()
+			} else {
+				files, err = b.storage.ListFiles(ctx, groupID, topicID)
+				if err != nil {
+					return fmt.Errorf("failed to list files: %w", err)
+				}
+			}
 		}
 
 		if len(files) == 0 {

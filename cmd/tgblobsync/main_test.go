@@ -32,7 +32,7 @@ func TestResolveIdentifiersWithNames(t *testing.T) {
 	}
 	console := &stubConsole{subdir: "chosen"}
 
-	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestResolveIdentifiersWithIDs(t *testing.T) {
 	}
 	console := &stubConsole{subdir: ""}
 
-	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,6 +95,10 @@ func (s *stubConsole) SelectSubDir(_ []string) (string, error) {
 
 func (s *stubConsole) ShowGroupTotals(_ domain.GroupTotals) error {
 	return nil
+}
+
+func (s *stubConsole) ConfirmCreateIndex(_ string) (bool, error) {
+	return false, nil
 }
 
 type stubTelegram struct {
@@ -154,7 +158,7 @@ func TestResolveIdentifiers_GroupNotFound(t *testing.T) {
 	storage := &stubTelegram{}
 	console := &stubConsole{}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
 	if err == nil {
 		t.Fatalf("expected error when group not found")
 	}
@@ -166,7 +170,7 @@ func TestResolveIdentifiers_TopicNotFound(t *testing.T) {
 	storage := &stubTelegram{groupByName: &domain.Group{ID: 7, Title: "MyGroup"}}
 	console := &stubConsole{}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
 	if err == nil {
 		t.Fatalf("expected error when topic not found")
 	}
@@ -178,7 +182,7 @@ func TestResolveIdentifiers_BackFromSubdir(t *testing.T) {
 	storage := &stubTelegram{files: []domain.RemoteFile{{Meta: domain.FileMeta{Path: "d/f"}, Size: 1}}}
 	console := &stubConsole{subdirErr: fmt.Errorf("back")}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
 	if err == nil || err.Error() != "back" {
 		t.Fatalf("expected back error, got %v", err)
 	}
