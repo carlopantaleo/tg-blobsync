@@ -27,13 +27,13 @@
 - [x] 4.3 Aggregate progress across chunks (single `ProgressTask` with total = logical size) and expose current chunk index + total chunk count for per-chunk UI (`chunk i/N`)
 - [x] 4.4 On upload error, best-effort delete the chunks already uploaded in the attempt
 - [x] 4.5 Return the new `chunkIDs` (extend `UploadFile` signature or add `UploadFileChunked` returning `[]int`)
-- [ ] 4.6 Tests with mock invoker: 3-chunk upload produces 3 messages with increasing `Idx` and correct captions; failure mid-upload deletes uploaded chunks
+- [x] 4.6 Tests with mock invoker: 3-chunk upload produces 3 messages with increasing `Idx` and correct captions; failure mid-upload deletes uploaded chunks
 
 ## 5. Telegram adapter - download (TDD)
 
 - [x] 5.1 Extend `DownloadFile` to accept `chunkIDs []int` (add overload or extend signature) and stream chunks in `Idx` order
 - [x] 5.2 Implement lazy chunk reader chaining on top of the existing per-message downloader; expose current chunk index + total chunk count for per-chunk UI
-- [ ] 5.3 Tests: multi-chunk download yields concatenated bytes in order; missing chunk ID returns error and no partial file
+- [x] 5.3 Tests: multi-chunk download yields concatenated bytes in order; missing chunk ID returns error and no partial file
 
 ## 6. Telegram adapter - delete and parse (TDD)
 
@@ -50,11 +50,11 @@
 
 ## 8. Use cases - differ and executor (TDD)
 
-- [ ] 8.1 Confirm `differ` already compares logical size (no change needed) and add tests for chunked push/pull plans counting the file once
+- [x] 8.1 Confirm `differ` already compares logical size (no change needed) and add tests for chunked push/pull plans counting the file once
 - [x] 8.2 Update `executor.upload` to call chunked upload and, on update, delete all old `ChunkIDs` after new chunks are uploaded
 - [x] 8.3 Update `executor.download` to pass `chunkIDs` to chunked download
 - [x] 8.4 Update `executor.deleteRemote` to delete all `ChunkIDs`
-- [ ] 8.5 Tests with mocks: chunked upload/update/download/delete operate on the whole logical file
+- [x] 8.5 Tests with mocks: chunked upload/update/download/delete operate on the whole logical file
 
 ## 9. TUI per-chunk progress
 
@@ -63,17 +63,17 @@
 
 ## 10. Index rebuild after sync
 
-- [ ] 10.1 Ensure post-sync index rebuild includes `chunkIDs` for chunked files (verify existing rebuild path picks up the new field via `NewFileIndex`)
-- [ ] 10.2 Test: after a chunked upload, the rebuilt index entry has correct `chunkIDs` and total size
+- [x] 10.1 Ensure post-sync index rebuild includes `chunkIDs` for chunked files (verify existing rebuild path picks up the new field via `NewFileIndex`)
+- [x] 10.2 Test: after a chunked upload, the rebuilt index entry has correct `chunkIDs` and total size
 
 ## 11. End-to-end and regression
 
-- [ ] 11.1 Add integration-style test (mock invoker) for a full push of a >threshold file: chunks uploaded, index rebuilt with `chunkIDs`, subsequent pull reassembles the file
-- [ ] 11.2 Regression: existing single-message upload/download/index tests still pass unchanged
-- [ ] 11.3 Run `go vet ./...` and `go test ./...` and fix any failures
+- [x] 11.1 Add integration-style test (mock invoker) for a full push of a >threshold file: chunks uploaded, index rebuilt with `chunkIDs`, subsequent pull reassembles the file
+- [x] 11.2 Regression: existing single-message upload/download/index tests still pass unchanged
+- [x] 11.3 Run `go vet ./...` and `go test ./...` and fix any failures
 
 ## 12. Documentation and commit hygiene
 
-- [ ] 12.1 Update `README.md` with a short note on large file support and the new config fields
-- [ ] 12.2 Make a conventional commit per milestone (config, domain, adapter upload, adapter download, adapter delete/parse, index, usecase, tui, e2e, docs)
-- [ ] 12.3 Run `openspec validate add-large-file-chunking` and fix any reported issues
+- [x] 12.1 Update `README.md` with a short note on large file support and the new config fields
+- [x] 12.2 Make a conventional commit per milestone (config, domain, adapter upload, adapter download, adapter delete/parse, index, usecase, tui, e2e, docs)
+- [x] 12.3 Run `openspec validate add-large-file-chunking` and fix any reported issues

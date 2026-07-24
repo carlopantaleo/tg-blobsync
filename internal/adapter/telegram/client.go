@@ -55,6 +55,7 @@ func NewTelegramClient(appID int, appHash string, sessionFile string) (*Telegram
 	return NewTelegramClientWithChunking(appID, appHash, sessionFile, 2*1024*1024*1024, 1*1024*1024*1024)
 }
 
+// NewTelegramClientWithChunking creates a Telegram client with large-file chunking settings.
 func NewTelegramClientWithChunking(appID int, appHash string, sessionFile string, chunkThreshold, chunkSize int64) (*TelegramClient, error) {
 	// Ensure session directory exists
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0700); err != nil {

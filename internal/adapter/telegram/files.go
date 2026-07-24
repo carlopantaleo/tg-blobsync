@@ -371,6 +371,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	return nil
 }
 
+// UploadChunkedFile uploads a logical file as ordered Telegram document chunks.
 func (t *TelegramClient) UploadChunkedFile(ctx context.Context, groupID, topicID int64, file domain.LocalFile) ([]int, error) {
 	plan := chunkPlan(file.Size, t.chunkThreshold, t.chunkSize)
 	if len(plan) == 0 {
@@ -422,6 +423,15 @@ func (t *TelegramClient) uploadChunk(ctx context.Context, peer *tg.InputPeerChan
 	}
 	reader := io.NewSectionReader(file, chunk.Offset, chunk.Length)
 	t.mu.Lock()
+	if t.progressStarts == nil {
+		t.progressStarts = make(map[int64]time.Time)
+	}
+	if t.progressTasks == nil {
+		t.progressTasks = make(map[int64]domain.ProgressTask)
+	}
+	if t.progressBases == nil {
+		t.progressBases = make(map[int64]int64)
+	}
 	t.progressStarts[uploadID] = time.Now()
 	t.progressBases[uploadID] = base
 	if task != nil {
@@ -512,6 +522,7 @@ func formatSize(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// DeleteChunkedFile deletes every Telegram message belonging to a logical file.
 func (t *TelegramClient) DeleteChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int) error {
 	for _, messageID := range chunkIDs {
 		if err := t.DeleteFile(ctx, groupID, topicID, messageID); err != nil {
@@ -535,6 +546,7 @@ func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID 
 	return err
 }
 
+// DownloadChunkedFile returns a lazy reader that concatenates chunk messages in order.
 func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
 	return newChunkReader(chunkIDs, func(messageID int) (io.ReadCloser, error) {
 		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size)

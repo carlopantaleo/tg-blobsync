@@ -20,6 +20,7 @@ type AppConfig struct {
 	ChunkSize      int64 `json:"chunkSize" yaml:"chunkSize"`
 }
 
+// ValidateChunkConfig validates the threshold and size used for file chunking.
 func ValidateChunkConfig(threshold, size int64) error {
 	if threshold <= 0 {
 		return fmt.Errorf("chunk threshold must be greater than zero")

@@ -5,6 +5,20 @@ import (
 	"tg-blobsync/internal/domain"
 )
 
+func TestDiffer_TreatsChunkedFileAsSingleLogicalFile(t *testing.T) {
+	differ := NewDiffer(true)
+	local := map[string]domain.LocalFile{"large.bin": {Path: "large.bin", ModTime: 10, Size: 100}}
+	remote := map[string]domain.RemoteFile{"large.bin": {
+		Meta:     domain.FileMeta{Path: "large.bin", ModTime: 10, Flags: domain.ChunkFlag},
+		ChunkIDs: []int{11, 12, 13},
+		Size:     100,
+	}}
+	plan := differ.DiffPush(local, remote)
+	if plan.Summary.Total != 0 {
+		t.Fatalf("chunked file plan total = %d, want 0", plan.Summary.Total)
+	}
+}
+
 func TestDiffer_SkipMD5UsesNormalizedEmptyFileSize(t *testing.T) {
 	differ := NewDiffer(true)
 	local := map[string]domain.LocalFile{"empty.txt": {Path: "empty.txt", ModTime: 10, Size: 0}}
