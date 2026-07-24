@@ -34,6 +34,8 @@ type TelegramClient struct {
 
 	progressTracker domain.ProgressTracker
 	uploadThreads   int
+	chunkThreshold  int64
+	chunkSize       int64
 }
 
 // Invoker interface for mocking Invoke calls.
@@ -49,6 +51,10 @@ type AuthInput interface {
 }
 
 func NewTelegramClient(appID int, appHash string, sessionFile string) (*TelegramClient, error) {
+	return NewTelegramClientWithChunking(appID, appHash, sessionFile, 2*1024*1024*1024, 1*1024*1024*1024)
+}
+
+func NewTelegramClientWithChunking(appID int, appHash string, sessionFile string, chunkThreshold, chunkSize int64) (*TelegramClient, error) {
 	// Ensure session directory exists
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create session dir: %w", err)
@@ -66,6 +72,8 @@ func NewTelegramClient(appID int, appHash string, sessionFile string) (*Telegram
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
 		uploadThreads:  4,
+		chunkThreshold: chunkThreshold,
+		chunkSize:      chunkSize,
 	}
 
 	return tc, nil

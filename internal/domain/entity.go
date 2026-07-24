@@ -5,6 +5,8 @@ const (
 	EmptyFileFlag = "EMPTY_FILE"
 	// IndexFlag marks a Telegram message containing a topic metadata index.
 	IndexFlag = "INDEX"
+	// ChunkFlag marks a Telegram message containing one chunk of a logical file.
+	ChunkFlag = "CHUNK"
 )
 
 // FileMeta represents the metadata stored in the caption of the Telegram message.
@@ -13,6 +15,7 @@ type FileMeta struct {
 	Checksum string `json:"m,omitempty"`
 	ModTime  int64  `json:"t,omitempty"`
 	Flags    string `json:"f,omitempty"`
+	Idx      int    `json:"i,omitempty"`
 }
 
 // FileIndexEntry represents a remote file in a topic metadata index.
@@ -23,6 +26,7 @@ type FileIndexEntry struct {
 	Flags     string `json:"f,omitempty"`
 	Size      int64  `json:"s"`
 	MessageID int    `json:"id"`
+	ChunkIDs  []int  `json:"c,omitempty"`
 }
 
 // FileIndex represents the metadata index stored in the most recent topic message.
@@ -41,6 +45,7 @@ func NewFileIndex(files []RemoteFile) FileIndex {
 			Flags:     file.Meta.Flags,
 			Size:      file.Size,
 			MessageID: file.MessageID,
+			ChunkIDs:  append([]int(nil), file.ChunkIDs...),
 		}
 	}
 	return FileIndex{Entries: entries}
@@ -59,6 +64,7 @@ func (i FileIndex) RemoteFiles() []RemoteFile {
 			},
 			MessageID: entry.MessageID,
 			Size:      entry.Size,
+			ChunkIDs:  append([]int(nil), entry.ChunkIDs...),
 		}
 	}
 	return files
@@ -74,6 +80,7 @@ type GroupTotals struct {
 type RemoteFile struct {
 	Meta      FileMeta
 	MessageID int
+	ChunkIDs  []int
 	Size      int64
 }
 

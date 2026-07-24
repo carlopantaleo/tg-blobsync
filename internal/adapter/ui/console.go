@@ -235,7 +235,11 @@ func (u *ConsoleUI) updateInteractiveLocked() {
 			}
 			bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
-			sb.WriteString(fmt.Sprintf("%-30s [%s] %5.1f%% %s / %s%s\n", name, bar, percent, formatSize(task.current), formatSize(task.total), speedStr))
+			chunkStr := ""
+			if task.chunkTotal > 0 {
+				chunkStr = fmt.Sprintf(" chunk %d/%d", task.chunkCurrent, task.chunkTotal)
+			}
+			sb.WriteString(fmt.Sprintf("%-30s [%s] %5.1f%% %s / %s%s%s\n", name, bar, percent, formatSize(task.current), formatSize(task.total), chunkStr, speedStr))
 		}
 	} else if u.interactiveContent != "" {
 		sb.WriteString(u.interactiveContent)
@@ -348,12 +352,14 @@ func (u *ConsoleUI) showDetailedChanges(plan domain.SyncPlan) {
 }
 
 type ConsoleTask struct {
-	ui        *ConsoleUI
-	name      string
-	total     int64
-	mu        sync.Mutex
-	current   int64
-	startTime time.Time
+	ui           *ConsoleUI
+	name         string
+	total        int64
+	mu           sync.Mutex
+	current      int64
+	startTime    time.Time
+	chunkCurrent int
+	chunkTotal   int
 }
 
 func (t *ConsoleTask) Increment(n int) {
@@ -366,6 +372,14 @@ func (t *ConsoleTask) Increment(n int) {
 func (t *ConsoleTask) SetCurrent(current int64) {
 	t.mu.Lock()
 	t.current = current
+	t.mu.Unlock()
+	t.ui.updateInteractive()
+}
+
+func (t *ConsoleTask) SetChunk(current, total int) {
+	t.mu.Lock()
+	t.chunkCurrent = current
+	t.chunkTotal = total
 	t.mu.Unlock()
 	t.ui.updateInteractive()
 }

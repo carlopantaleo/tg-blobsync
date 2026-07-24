@@ -25,10 +25,11 @@ func (dummyUI) SelectSessionAction() (string, error)                  { return "
 // minimal ProgressTask implementation (never used)
 type nopTask struct{}
 
-func (nopTask) Increment(int)    {}
-func (nopTask) SetCurrent(int64) {}
-func (nopTask) Complete()        {}
-func (nopTask) Abort()           {}
+func (nopTask) Increment(int)     {}
+func (nopTask) SetCurrent(int64)  {}
+func (nopTask) SetChunk(int, int) {}
+func (nopTask) Complete()         {}
+func (nopTask) Abort()            {}
 
 func TestSessionManager_ListSelectDelete(t *testing.T) {
 	dir := t.TempDir()

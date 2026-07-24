@@ -214,10 +214,11 @@ func (m *MockUserInterface) WaitForInput(message string) error          { return
 
 type MockTask struct{}
 
-func (m *MockTask) Increment(n int)          {}
-func (m *MockTask) SetCurrent(current int64) {}
-func (m *MockTask) Complete()                {}
-func (m *MockTask) Abort()                   {}
+func (m *MockTask) Increment(n int)             {}
+func (m *MockTask) SetCurrent(current int64)    {}
+func (m *MockTask) SetChunk(current, total int) {}
+func (m *MockTask) Complete()                   {}
+func (m *MockTask) Abort()                      {}
 
 // MockBrowseUI
 type MockBrowseUI struct {
