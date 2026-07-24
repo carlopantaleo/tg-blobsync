@@ -30,6 +30,7 @@ type TelegramClient struct {
 	peerCache      map[int64]int64 // map[ChannelID]AccessHash
 	progressStarts map[int64]time.Time
 	progressTasks  map[int64]domain.ProgressTask
+	progressBases  map[int64]int64
 	mu             sync.RWMutex
 
 	progressTracker domain.ProgressTracker
@@ -71,6 +72,7 @@ func NewTelegramClientWithChunking(appID int, appHash string, sessionFile string
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
+		progressBases:  make(map[int64]int64),
 		uploadThreads:  4,
 		chunkThreshold: chunkThreshold,
 		chunkSize:      chunkSize,

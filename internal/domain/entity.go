@@ -26,7 +26,7 @@ type FileIndexEntry struct {
 	Flags     string `json:"f,omitempty"`
 	Size      int64  `json:"s"`
 	MessageID int    `json:"id"`
-	ChunkIDs  []int  `json:"c,omitempty"`
+	ChunkIDs  []int  `json:"chunkIDs,omitempty"`
 }
 
 // FileIndex represents the metadata index stored in the most recent topic message.
