@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,44 @@ func (d *dummyTracker) Start(name string, total int64) domain.ProgressTask {
 }
 
 func (d *dummyTracker) Wait() {}
+
+func TestTelegramClient_UploadChunk_Uses1BasedIndex(t *testing.T) {
+	// A basic test to assert that logic starting `Idx` from 1 rather than 0 behaves correctly.
+	// Since uploadChunk logic is mostly internal/hard to mock simply, we'll verify our assumption
+	// on how the JSON marshals 1 vs 0 when `omitempty` is present, which is the core reason for the change.
+
+	// First chunk (1-based index)
+	metaFirst := domain.FileMeta{
+		Path:  "chunked.bin",
+		Idx:   1,
+		Flags: domain.ChunkFlag,
+	}
+
+	bytesFirst, err := json.Marshal(metaFirst)
+	if err != nil {
+		t.Fatalf("Failed to marshal first chunk meta: %v", err)
+	}
+
+	strFirst := string(bytesFirst)
+	if !strings.Contains(strFirst, `"i":1`) {
+		t.Errorf("Expected first chunk to explicitly contain \"i\":1, got: %s", strFirst)
+	}
+
+	// Non-chunked file (index 0)
+	metaNonChunked := domain.FileMeta{
+		Path: "small.txt",
+	}
+
+	bytesNonChunked, err := json.Marshal(metaNonChunked)
+	if err != nil {
+		t.Fatalf("Failed to marshal non-chunked meta: %v", err)
+	}
+
+	strNonChunked := string(bytesNonChunked)
+	if strings.Contains(strNonChunked, `"i":`) {
+		t.Errorf("Expected non-chunked file to omit index completely, got: %s", strNonChunked)
+	}
+}
 
 func TestTelegramClient_ListFiles(t *testing.T) {
 	mockInvoker := NewMockInvoker()
