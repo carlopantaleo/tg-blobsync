@@ -34,5 +34,5 @@
 - [x] 5.1 Run `go test ./...` and `go vet ./...`
 - [x] 5.2 Update README with automatic FLOOD_WAIT waiting and the removal of Takeout-specific behavior
 - [x] 5.3 Update any retry/history comments that still describe the Takeout threshold
-- [ ] 5.4 Make conventional commits for retry core, Telegram pagination, Takeout removal, and docs/verification
-- [ ] 5.5 Run `openspec validate handle-flood-wait-retries` and fix any reported issues
+- [x] 5.4 Make conventional commits for retry core, Telegram pagination, Takeout removal, and docs/verification
+- [x] 5.5 Run `openspec validate handle-flood-wait-retries` and fix any reported issues
