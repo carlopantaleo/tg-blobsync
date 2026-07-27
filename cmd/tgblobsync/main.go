@@ -240,8 +240,17 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 
 		// 3. SubDir selection
 		if cfg.SubDir == "" && (cfg.Command == "push" || cfg.Command == "pull") {
-			files, err := storage.ListFiles(ctx, groupID, topicID)
-			if err == nil {
+			var files []domain.RemoteFile
+			var err error
+
+			index, _, indexed, getIndexErr := blobStorage.GetIndex(ctx, groupID, topicID)
+			if getIndexErr == nil && indexed {
+				files = index.RemoteFiles()
+			} else {
+				files, err = storage.ListFiles(ctx, groupID, topicID)
+			}
+
+			if err == nil && len(files) > 0 {
 				subdirsMap := make(map[string]bool)
 				for _, f := range files {
 					path := filepath.ToSlash(f.Meta.Path)
