@@ -19,5 +19,6 @@ rules:
   tasks:
     - The VERY FIRST task in group 1 MUST be to create and checkout the feature branch (`feature/<kebab-case-name>`).
     - Every heading (`##`) represents a Milestone.
+    - Every milestone composed of implementation tasks MUST start with tests, in accordance to TDD principles.
     - The VERY LAST task in EVERY Milestone group MUST be a git commit command to save the progress of that milestone.
   
