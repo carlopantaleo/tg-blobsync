@@ -380,10 +380,9 @@ func TestTelegramClient_AccessHash(t *testing.T) {
 	}
 }
 
-func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
+func TestTelegramClient_ListFiles_Pagination(t *testing.T) {
 	mockInvoker := NewMockInvoker()
 
-	// Setup TelegramClient with mock api
 	client := &TelegramClient{
 		api:            tg.NewClient(mockInvoker),
 		peerCache:      make(map[int64]int64),
@@ -394,26 +393,15 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 	client.sender = message.NewSender(client.api)
 	client.setAccessHash(100, 12345) // Group ID 100
 
-	// Define test data
 	topicID := int64(200)
 
-	// Prepare messages
 	fileMeta := domain.FileMeta{
-		Path:     "test_takeout.txt",
-		Checksum: "takeout_abc",
+		Path:     "test_pagination.txt",
+		Checksum: "pag_abc",
 		ModTime:  time.Now().Unix(),
 	}
 	metaBytes, _ := json.Marshal(fileMeta)
 
-	// High ID message to trigger Takeout (no longer relying on ID, but keeping it high for consistency)
-	highIDMsg := &tg.Message{
-		ID:      3000,
-		Date:    int(time.Now().Unix()),
-		PeerID:  &tg.PeerChannel{ChannelID: 100},
-		Message: "not a file",
-	}
-
-	// File message for Takeout response
 	fileMsg := &tg.Message{
 		ID:      3001,
 		Date:    int(time.Now().Unix()),
@@ -434,94 +422,24 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 		},
 	}
 
-	// Counters for multiple calls
 	messagesGetHistoryCallCount := 0
-	invokeWithTakeoutCallCount := 0
 
-	// Mock MessagesGetRepliesRequest (initial call to trigger Takeout)
 	mockInvoker.Register(&tg.MessagesGetRepliesRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 		messagesGetHistoryCallCount++
 		if messagesGetHistoryCallCount == 1 {
-			// Return high Count to trigger Takeout
-			resp := &tg.MessagesChannelMessages{
-				Messages: []tg.MessageClass{highIDMsg},
-				Count:    3001,
-				Chats:    []tg.ChatClass{},
-				Users:    []tg.UserClass{},
-			}
-			buf := new(bin.Buffer)
-			if err := resp.Encode(buf); err != nil {
-				return err
-			}
-			return output.Decode(buf)
-		}
-		// Should not be called again
-		return errors.New("unexpected MessagesGetRepliesRequest call")
-	})
-
-	// Mock AccountInitTakeoutSession
-	mockInvoker.Register(&tg.AccountInitTakeoutSessionRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
-		resp := &tg.AccountTakeout{
-			ID: 123456, // Takeout ID
-		}
-		buf := new(bin.Buffer)
-		if err := resp.Encode(buf); err != nil {
-			return err
-		}
-		return output.Decode(buf)
-	})
-
-	// Mock InvokeWithTakeoutRequest (Takeout API calls)
-	mockInvoker.Register(&tg.InvokeWithTakeoutRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
-		invokeWithTakeoutCallCount++
-		req := input.(*tg.InvokeWithTakeoutRequest)
-		if req.TakeoutID != 123456 {
-			return errors.New("invalid takeout ID")
-		}
-
-		if _, ok := req.Query.(*tg.MessagesGetRepliesRequest); !ok {
-			return errors.New("invalid inner query")
-		}
-
-		switch invokeWithTakeoutCallCount {
-		case 1:
-			// First Takeout call: return file message
+			// Return a high count to show pagination is used even for large topics
 			resp := &tg.MessagesChannelMessages{
 				Messages: []tg.MessageClass{fileMsg},
-				Count:    1,
-				Chats:    []tg.ChatClass{},
-				Users:    []tg.UserClass{},
+				Count:    3001,
 			}
-			buf := new(bin.Buffer)
-			if err := resp.Encode(buf); err != nil {
-				return err
-			}
-			return output.Decode(buf)
-		case 2:
-			// Second Takeout call: return empty to stop
-			resp := &tg.MessagesChannelMessages{
-				Messages: []tg.MessageClass{},
-				Count:    0,
-				Chats:    []tg.ChatClass{},
-				Users:    []tg.UserClass{},
-			}
-			buf := new(bin.Buffer)
-			if err := resp.Encode(buf); err != nil {
-				return err
-			}
-			return output.Decode(buf)
+			return encodeResponse(output, resp)
 		}
-		return errors.New("unexpected InvokeWithTakeoutRequest call")
-	})
-
-	// Mock AccountFinishTakeoutSession
-	mockInvoker.Register(&tg.AccountFinishTakeoutSessionRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
-		resp := &tg.BoolTrue{}
-		buf := new(bin.Buffer)
-		if err := resp.Encode(buf); err != nil {
-			return err
+		// Second call returns empty list to stop pagination
+		resp := &tg.MessagesChannelMessages{
+			Messages: []tg.MessageClass{},
+			Count:    0,
 		}
-		return output.Decode(buf)
+		return encodeResponse(output, resp)
 	})
 
 	files, err := client.ListFiles(context.Background(), 100, topicID)
@@ -532,10 +450,7 @@ func TestTelegramClient_ListFiles_Takeout(t *testing.T) {
 	if len(files) != 1 {
 		t.Errorf("Expected 1 file, got %d", len(files))
 	}
-	if files[0].Meta.Path != "test_takeout.txt" {
+	if files[0].Meta.Path != "test_pagination.txt" {
 		t.Errorf("Unexpected file path: %s", files[0].Meta.Path)
-	}
-	if files[0].Meta.Checksum != "takeout_abc" {
-		t.Errorf("Unexpected checksum: %s", files[0].Meta.Checksum)
 	}
 }

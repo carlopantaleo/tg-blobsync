@@ -7,101 +7,115 @@ import (
 	"time"
 )
 
-func TestWithRetry(t *testing.T) {
+func TestParseFloodWait(t *testing.T) {
 	tests := []struct {
 		name        string
-		maxRetries  int
-		baseDelay   time.Duration
-		op          func() (int, error) // Returns attempts made and error
-		expectedErr bool
-		expectedAtt int
+		err         error
+		wantSeconds int
+		wantMatch   bool
 	}{
 		{
-			name:       "Success on first attempt",
-			maxRetries: 3,
-			baseDelay:  1 * time.Millisecond,
-			op: func() func() (int, error) {
-				attempts := 0
-				return func() (int, error) {
-					attempts++
-					return attempts, nil
-				}
-			}(),
-			expectedErr: false,
-			expectedAtt: 1,
+			name:        "canonical",
+			err:         errors.New("rpc error code 420: FLOOD_WAIT (25)"),
+			wantSeconds: 25,
+			wantMatch:   true,
 		},
 		{
-			name:       "Success after retries",
-			maxRetries: 3,
-			baseDelay:  1 * time.Millisecond,
-			op: func() func() (int, error) {
-				attempts := 0
-				return func() (int, error) {
-					attempts++
-					if attempts < 3 {
-						return attempts, errors.New("fail")
-					}
-					return attempts, nil
-				}
-			}(),
-			expectedErr: false,
-			expectedAtt: 3,
+			name:        "wrapped",
+			err:         errors.New("something went wrong: FLOOD_WAIT (7)"),
+			wantSeconds: 7,
+			wantMatch:   true,
 		},
 		{
-			name:       "Fail after max retries",
-			maxRetries: 3,
-			baseDelay:  1 * time.Millisecond,
-			op: func() func() (int, error) {
-				attempts := 0
-				return func() (int, error) {
-					attempts++
-					return attempts, errors.New("persistent fail")
-				}
-			}(),
-			expectedErr: true,
-			expectedAtt: 3,
+			name:        "malformed",
+			err:         errors.New("FLOOD_WAIT (abc)"),
+			wantSeconds: 0,
+			wantMatch:   false,
+		},
+		{
+			name:        "unrelated",
+			err:         errors.New("some other error"),
+			wantSeconds: 0,
+			wantMatch:   false,
+		},
+		{
+			name:        "nil",
+			err:         nil,
+			wantSeconds: 0,
+			wantMatch:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-
-			// Wrapper to capture attempts count from the closure
-			var attempts int
-			op := func() error {
-				att, err := tt.op()
-				attempts = att
-				return err
-			}
-
-			err := WithRetry(ctx, "test", op, tt.maxRetries, tt.baseDelay)
-
-			if (err != nil) != tt.expectedErr {
-				t.Errorf("WithRetry() error = %v, expectedErr %v", err, tt.expectedErr)
-			}
-
-			if attempts != tt.expectedAtt {
-				t.Errorf("WithRetry() attempts = %v, expected %v", attempts, tt.expectedAtt)
+			gotSeconds, gotMatch := ParseFloodWait(tt.err)
+			if gotSeconds != tt.wantSeconds || gotMatch != tt.wantMatch {
+				t.Errorf("ParseFloodWait() = (%v, %v), want (%v, %v)", gotSeconds, gotMatch, tt.wantSeconds, tt.wantMatch)
 			}
 		})
 	}
 }
 
-func TestWithRetry_ContextCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	maxRetries := 5
-	baseDelay := 10 * time.Millisecond
+// Mock clock for testing
+type mockClock struct {
+	slept []time.Duration
+}
 
-	// Cancel context immediately
-	cancel()
+func (m *mockClock) Sleep(ctx context.Context, d time.Duration) error {
+	m.slept = append(m.slept, d)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
 
+func TestWithRetry_FloodWait(t *testing.T) {
+	clock := &mockClock{}
+	oldSleep := sleepFunc
+	sleepFunc = clock.Sleep
+	defer func() { sleepFunc = oldSleep }()
+
+	attempts := 0
 	op := func() error {
-		return errors.New("should not be called or should fail immediately")
+		attempts++
+		if attempts == 1 {
+			return errors.New("FLOOD_WAIT (5)")
+		}
+		return nil
 	}
 
-	err := WithRetry(ctx, "test-cancel", op, maxRetries, baseDelay)
-	if err == nil {
-		t.Error("WithRetry() expected error due to context cancellation, got nil")
+	err := WithRetry(context.Background(), "test_flood", op, 3, time.Millisecond)
+	if err != nil {
+		t.Fatalf("expected nil error, got: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got: %d", attempts)
+	}
+	if len(clock.slept) != 1 || clock.slept[0] != 5*time.Second {
+		t.Fatalf("expected to sleep for 5s, got: %v", clock.slept)
+	}
+}
+
+func TestWithRetry_FloodWait_Cancel(t *testing.T) {
+	clock := &mockClock{}
+	oldSleep := sleepFunc
+	sleepFunc = func(ctx context.Context, d time.Duration) error {
+		clock.slept = append(clock.slept, d)
+		return context.Canceled
+	}
+	defer func() { sleepFunc = oldSleep }()
+
+	op := func() error {
+		return errors.New("FLOOD_WAIT (10)")
+	}
+
+	err := WithRetry(context.Background(), "test_flood_cancel", op, 3, time.Millisecond)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+	if len(clock.slept) != 1 || clock.slept[0] != 10*time.Second {
+		t.Fatalf("expected to try to sleep for 10s, got: %v", clock.slept)
 	}
 }

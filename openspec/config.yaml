@@ -9,16 +9,13 @@ context: |
   We use conventional commits
   Domain: blob storage synchronization
   Style guide and conventions: clean code (SOLID, DRY, YAGNI), DDD and TDD (new features *must* be implemented with a test driven development approach)
-  Tool use: if the 'openspec' command is needed, always use it through npx (`npx @fission-ai/openspec@latest <command>`)
   Language: Italian for chat messages, English for anything else
-  GIT: each new feature must be implemented in a separate branch. Make a commit for every milestone reached during the implementation.
+  GIT: each new feature must be implemented in a separate feature branch ('feature/name-of-feature'). Make a commit for every milestone reached during the implementation.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - The VERY FIRST task in group 1 MUST be to create and checkout the feature branch: `feature/<kebab-case-name>`.
+    - Every heading (`##`) represents a Milestone.
+    - The VERY LAST task in EVERY Milestone group MUST be a git commit command to save the progress of that milestone.
