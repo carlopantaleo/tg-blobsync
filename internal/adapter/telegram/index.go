@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"tg-blobsync/internal/domain"
+	"tg-blobsync/internal/pkg/retry"
 
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/styling"
@@ -106,9 +108,14 @@ func (t *TelegramClient) ListIndexMessageIDs(ctx context.Context, groupID int64,
 	offsetID := 0
 
 	for {
-		history, err := t.api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
-			Peer: peer, MsgID: int(topicID), OffsetID: offsetID, Limit: 100,
-		})
+		var history tg.MessagesMessagesClass
+		err := retry.WithRetry(ctx, "ListIndexMessageIDs page", func() error {
+			var innerErr error
+			history, innerErr = t.api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
+				Peer: peer, MsgID: int(topicID), OffsetID: offsetID, Limit: 100,
+			})
+			return innerErr
+		}, 5, time.Second)
 		if err != nil {
 			return nil, err
 		}
@@ -131,10 +138,15 @@ func (t *TelegramClient) ListIndexMessageIDs(ctx context.Context, groupID int64,
 
 func (t *TelegramClient) getLatestTopicMessage(ctx context.Context, groupID int64, topicID int64) (*tg.Message, error) {
 	accessHash, _ := t.getAccessHash(groupID)
-	history, err := t.api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
-		Peer:  &tg.InputPeerChannel{ChannelID: groupID, AccessHash: accessHash},
-		MsgID: int(topicID), Limit: 1,
-	})
+	var history tg.MessagesMessagesClass
+	err := retry.WithRetry(ctx, "getLatestTopicMessage", func() error {
+		var innerErr error
+		history, innerErr = t.api.MessagesGetReplies(ctx, &tg.MessagesGetRepliesRequest{
+			Peer:  &tg.InputPeerChannel{ChannelID: groupID, AccessHash: accessHash},
+			MsgID: int(topicID), Limit: 1,
+		})
+		return innerErr
+	}, 5, time.Second)
 	if err != nil {
 		return nil, err
 	}

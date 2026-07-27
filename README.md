@@ -9,6 +9,7 @@ Please bear in mind that Telegram is not intended to be used as a blob storage a
 - **Interactive Browser**: Navigate and explore virtual directories, download individual files using the `browse` command.
 - **TUI (Terminal User Interface)**: Modern and interactive UI powered by `Bubble Tea`, featuring real-time progress updates and intuitive selection menus.
 - **Efficient Synchronization**: Compare files using MD5 checksums or modification time (`--skip-md5`).
+- **Automatic Rate-Limit Recovery**: Operations transparently pause and retry if Telegram returns `FLOOD_WAIT` rate-limit errors.
 - **Large File Support**: Files larger than Telegram's 2 GB single-document limit are split into ordered chunks and reassembled during download.
 - **Forum Topics as Buckets**: Organizes files within specific Supergroup (Forum) Topics.
 - **Smart Handling of Special Files**: Correctly handles 0-byte (empty) files, which are natively rejected by Telegram.
