@@ -353,8 +353,15 @@ func (t *TelegramClient) UploadChunkedFile(ctx context.Context, groupID, topicID
 		if task != nil {
 			task.SetChunk(index+1, len(plan))
 		}
-		// Pass index+1 to start Idx at 1 instead of 0
-		messageID, uploadErr := t.uploadChunk(ctx, inputPeer, topicID, fd, file, chunk, index+1, completed, task)
+
+		var messageID int
+		uploadErr := retry.WithRetry(ctx, fmt.Sprintf("UploadChunkedFile %s part %d", file.Path, index+1), func() error {
+			var err error
+			// Pass index+1 to start Idx at 1 instead of 0
+			messageID, err = t.uploadChunk(ctx, inputPeer, topicID, fd, file, chunk, index+1, completed, task)
+			return err
+		}, 5, 1*time.Second)
+
 		if uploadErr != nil {
 			if task != nil {
 				task.Abort()
