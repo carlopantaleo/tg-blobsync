@@ -19,6 +19,6 @@
 
 ## 4. Refactoring (Refactor Phase)
 
-- [ ] 4.1 Refactor code if necessary to ensure it's clean and readable (SOLID, DRY).
-- [ ] 4.2 Run tests again to ensure they still pass.
-- [ ] 4.3 Commit milestone: Refactor chunked upload retry code
+- [x] 4.1 Refactor code if necessary to ensure it's clean and readable (SOLID, DRY).
+- [x] 4.2 Run tests again to ensure they still pass.
+- [x] 4.3 Commit milestone: Refactor chunked upload retry code
