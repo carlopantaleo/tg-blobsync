@@ -49,6 +49,24 @@ func TestSynchronizer_PushRebuildsIndexAfterChanges(t *testing.T) {
 	}
 }
 
+func TestSynchronizer_RebuildsChunkedIndexEntry(t *testing.T) {
+	storage := NewMockBlobStorage()
+	storage.Files[1] = map[int64][]domain.RemoteFile{2: {{
+		Meta:      domain.FileMeta{Path: "large.bin", Flags: domain.ChunkFlag},
+		ChunkIDs:  []int{21, 22},
+		MessageID: 21,
+		Size:      100,
+	}}}
+	sync := NewSynchronizer(NewMockFileSystem(), storage, 1, &MockUserInterface{Confirmed: true}, false)
+	if err := sync.rebuildIndex(context.Background(), 1, 2, 0); err != nil {
+		t.Fatalf("rebuild index: %v", err)
+	}
+	entry := storage.Indexes[1][2].Entries[0]
+	if len(entry.ChunkIDs) != 2 || entry.ChunkIDs[0] != 21 || entry.ChunkIDs[1] != 22 || entry.Size != 100 {
+		t.Fatalf("index entry = %#v", entry)
+	}
+}
+
 func TestSynchronizer_SkipsIndexRebuildWhenUpToDate(t *testing.T) {
 	mockFS := NewMockFileSystem()
 	mockFS.Files["file1.txt"] = domain.LocalFile{Path: "file1.txt", Size: 100, ModTime: 10}

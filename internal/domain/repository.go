@@ -16,6 +16,7 @@ type ProgressTracker interface {
 type ProgressTask interface {
 	Increment(n int)
 	SetCurrent(current int64)
+	SetChunk(current, total int)
 	Complete()
 	Abort()
 }

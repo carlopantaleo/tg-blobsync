@@ -30,10 +30,13 @@ type TelegramClient struct {
 	peerCache      map[int64]int64 // map[ChannelID]AccessHash
 	progressStarts map[int64]time.Time
 	progressTasks  map[int64]domain.ProgressTask
+	progressBases  map[int64]int64
 	mu             sync.RWMutex
 
 	progressTracker domain.ProgressTracker
 	uploadThreads   int
+	chunkThreshold  int64
+	chunkSize       int64
 }
 
 // Invoker interface for mocking Invoke calls.
@@ -49,6 +52,11 @@ type AuthInput interface {
 }
 
 func NewTelegramClient(appID int, appHash string, sessionFile string) (*TelegramClient, error) {
+	return NewTelegramClientWithChunking(appID, appHash, sessionFile, 2*1024*1024*1024, 1*1024*1024*1024)
+}
+
+// NewTelegramClientWithChunking creates a Telegram client with large-file chunking settings.
+func NewTelegramClientWithChunking(appID int, appHash string, sessionFile string, chunkThreshold, chunkSize int64) (*TelegramClient, error) {
 	// Ensure session directory exists
 	if err := os.MkdirAll(filepath.Dir(sessionFile), 0700); err != nil {
 		return nil, fmt.Errorf("failed to create session dir: %w", err)
@@ -65,7 +73,10 @@ func NewTelegramClient(appID int, appHash string, sessionFile string) (*Telegram
 		peerCache:      make(map[int64]int64),
 		progressStarts: make(map[int64]time.Time),
 		progressTasks:  make(map[int64]domain.ProgressTask),
+		progressBases:  make(map[int64]int64),
 		uploadThreads:  4,
+		chunkThreshold: chunkThreshold,
+		chunkSize:      chunkSize,
 	}
 
 	return tc, nil

@@ -139,6 +139,28 @@ func TestExecutor_Execute(t *testing.T) {
 	}
 }
 
+func TestExecutor_ChunkedDownloadAndDelete(t *testing.T) {
+	storage := NewMockBlobStorage()
+	fs := NewMockFileSystem()
+	executor := NewExecutor(fs, storage, 1, &MockUserInterface{Confirmed: true})
+	remote := domain.RemoteFile{Meta: domain.FileMeta{Path: "large.bin"}, ChunkIDs: []int{10, 11}, Size: 20}
+	plan := domain.SyncPlan{Items: []domain.SyncItem{{Path: "large.bin", Action: domain.ActionDownload, RemoteFile: &remote}}, Summary: domain.SyncSummary{Total: 1}}
+	if err := executor.Execute(context.Background(), plan, "root", 1, 2); err != nil {
+		t.Fatalf("chunked download: %v", err)
+	}
+	if got := string(fs.Data[filepath.Join("root", "large.bin")]); got != "dummy contentdummy content" {
+		t.Fatalf("downloaded data = %q", got)
+	}
+
+	deletePlan := domain.SyncPlan{Items: []domain.SyncItem{{Path: "large.bin", Action: domain.ActionDeleteRemote, RemoteFile: &remote}}, Summary: domain.SyncSummary{Total: 1}}
+	if err := executor.Execute(context.Background(), deletePlan, "root", 1, 2); err != nil {
+		t.Fatalf("chunked delete: %v", err)
+	}
+	if len(storage.DeletedIDs) != 2 || storage.DeletedIDs[0] != 10 || storage.DeletedIDs[1] != 11 {
+		t.Fatalf("deleted IDs = %#v", storage.DeletedIDs)
+	}
+}
+
 func TestExecutor_DeleteRemote(t *testing.T) {
 	mockFS := NewMockFileSystem()
 	mockStorage := NewMockBlobStorage()

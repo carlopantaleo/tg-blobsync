@@ -1,10 +1,4 @@
-# Topic Index Specification
-
-## Purpose
-
-Defines a per-topic index document stored as the last message in a Telegram topic, enabling fast remote state recovery without paginating through all messages. The index contains complete file metadata (path, checksum, modification time, flags, size, message ID) and is maintained automatically during synchronization, with optional user-initiated creation during browse and group totals operations.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Topic index document
 The system SHALL maintain, for each topic, a single INDEX message that is the most recent message in the topic and that contains a JSON document (`index.json`) with the complete metadata of every file stored in the topic. Each entry in the index SHALL include the file path, checksum, modification time, flags, size, and the Telegram message ID of the corresponding file message. For a chunked logical file, the entry SHALL additionally include a `chunkIDs` field holding the Telegram message IDs of every chunk in `Idx` order, and the `size` field SHALL hold the total logical size (sum of all chunk sizes). The INDEX message caption SHALL be exactly `{"f":"INDEX"}` so that the index can be detected by inspecting only the last message of the topic.
@@ -98,16 +92,3 @@ The system SHALL rebuild the index after any synchronization that performs at le
 #### Scenario: Sync with no changes leaves the index untouched
 - **WHEN** a synchronization completes and no changes were performed (everything up to date)
 - **THEN** the system SHALL NOT delete or upload any INDEX message
-
-### Requirement: Size handling without EMPTY_FILE special-case
-The system SHALL populate `RemoteFile.Size` from the index entry's `size` field when the remote state is recovered from the index. The differ SHALL compare sizes directly without special-casing the `EMPTY_FILE` flag, because empty files are represented with `size` equal to 0 in the index.
-
-#### Scenario: Skip-MD5 comparison uses index size
-- **WHEN** the differ compares a local file against a remote file recovered from the index using modification time and size
-- **THEN** the differ SHALL use the `size` from the index entry as the remote size
-- **AND** the differ SHALL NOT apply any special-case adjustment for the `EMPTY_FILE` flag
-
-#### Scenario: Legacy fallback normalizes empty file size
-- **WHEN** the remote state is recovered via the legacy fallback and a file message has the `EMPTY_FILE` flag
-- **THEN** the system SHALL set the `RemoteFile.Size` to 0
-- **AND** the differ SHALL compare sizes directly without special-casing the `EMPTY_FILE` flag

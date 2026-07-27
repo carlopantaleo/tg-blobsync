@@ -25,6 +25,16 @@ func TestConsoleUI_HeadlessProgress(t *testing.T) {
 	}
 }
 
+func TestConsoleUI_ChunkProgress(t *testing.T) {
+	ui := NewConsoleUITest()
+	task := ui.Start("large.bin", 100)
+	task.SetChunk(2, 5)
+	consoleTask := ui.activeTasks["large.bin"]
+	if consoleTask.chunkCurrent != 2 || consoleTask.chunkTotal != 5 {
+		t.Fatalf("chunk progress = %d/%d, want 2/5", consoleTask.chunkCurrent, consoleTask.chunkTotal)
+	}
+}
+
 func TestConsoleUI_WaitProgress(t *testing.T) {
 	ui := NewConsoleUITest()
 	ui.SetTotalFiles(1)

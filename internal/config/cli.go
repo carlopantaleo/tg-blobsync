@@ -10,17 +10,19 @@ import (
 
 // CLIConfig holds the configuration parsed from command line arguments.
 type CLIConfig struct {
-	Command       string
-	AppID         int
-	AppHash       string
-	SessionPath   string
-	GroupName     string
-	TopicName     string
-	DirPath       string
-	SubDir        string
-	Workers       int
-	UploadThreads int
-	SkipMD5       bool
+	Command        string
+	AppID          int
+	AppHash        string
+	SessionPath    string
+	GroupName      string
+	TopicName      string
+	DirPath        string
+	SubDir         string
+	Workers        int
+	UploadThreads  int
+	SkipMD5        bool
+	ChunkThreshold int64 `json:"chunkThreshold" yaml:"chunkThreshold"`
+	ChunkSize      int64 `json:"chunkSize" yaml:"chunkSize"`
 }
 
 // ParseCLI parses command line arguments and environment variables.
@@ -32,11 +34,17 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 	cmd := os.Args[1]
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 
-	cfg := &CLIConfig{Command: cmd}
+	cfg := &CLIConfig{
+		Command:        cmd,
+		ChunkThreshold: DefaultChunkThreshold,
+		ChunkSize:      DefaultChunkSize,
+	}
 
 	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
 	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
+	fs.Int64Var(&cfg.ChunkThreshold, "chunk-threshold", DefaultChunkThreshold, "Chunk files larger than this many bytes")
+	fs.Int64Var(&cfg.ChunkSize, "chunk-size", DefaultChunkSize, "Size of each uploaded chunk in bytes")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", cmd)
@@ -114,6 +122,9 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 
 	if (cmd == "push" || cmd == "pull") && cfg.DirPath == "" {
 		return nil, fmt.Errorf("local path is required for push/pull commands")
+	}
+	if err := ValidateChunkConfig(cfg.ChunkThreshold, cfg.ChunkSize); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

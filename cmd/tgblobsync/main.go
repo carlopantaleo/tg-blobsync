@@ -88,7 +88,7 @@ func run() error {
 	sessionFile := filepath.Join(sessionDir, "session_"+active.ID+".json")
 	log.Printf("Using session: %s", active.ID)
 
-	tgClient, err := telegram.NewTelegramClient(cfg.AppID, cfg.AppHash, sessionFile)
+	tgClient, err := telegram.NewTelegramClientWithChunking(cfg.AppID, cfg.AppHash, sessionFile, cfg.ChunkThreshold, cfg.ChunkSize)
 	if err != nil {
 		return fmt.Errorf("failed to create telegram client: %w", err)
 	}

@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"mime"
+	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"tg-blobsync/internal/domain"
@@ -121,7 +123,57 @@ func (t *TelegramClient) ListFiles(ctx context.Context, groupID int64, topicID i
 		offsetID = lastMsg.GetID()
 	}
 
-	return files, nil
+	return groupChunkFiles(files), nil
+}
+
+func groupChunkFiles(files []domain.RemoteFile) []domain.RemoteFile {
+	groups := make(map[string][]domain.RemoteFile)
+	order := make([]string, 0)
+	var result []domain.RemoteFile
+	for _, file := range files {
+		if file.Meta.Flags != domain.ChunkFlag {
+			result = append(result, file)
+			continue
+		}
+		key := file.Meta.Path
+		if file.Meta.Checksum != "" {
+			key += "\x00" + file.Meta.Checksum
+		}
+		if _, exists := groups[key]; !exists {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], file)
+	}
+	for _, key := range order {
+		chunks := groups[key]
+		sort.Slice(chunks, func(i, j int) bool { return chunks[i].Meta.Idx < chunks[j].Meta.Idx })
+		if !isCompleteChunkSet(chunks) {
+			continue
+		}
+		chunkIDs := make([]int, len(chunks))
+		var totalSize int64
+		for i, chunk := range chunks {
+			chunkIDs[i] = chunk.MessageID
+			totalSize += chunk.Size
+		}
+		first := chunks[0]
+		first.ChunkIDs = chunkIDs
+		first.Size = totalSize
+		result = append(result, first)
+	}
+	return result
+}
+
+func isCompleteChunkSet(chunks []domain.RemoteFile) bool {
+	if len(chunks) == 0 || chunks[0].Meta.Idx != 0 {
+		return false
+	}
+	for index, chunk := range chunks {
+		if chunk.Meta.Idx != index {
+			return false
+		}
+	}
+	return true
 }
 
 // GroupTotals returns aggregate file count and size, using topic indexes when available.
@@ -210,6 +262,11 @@ func addIndexTotals(totals *domain.GroupTotals, index domain.FileIndex) {
 
 // UploadFile uploads a file to the topic with progress reporting.
 func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+	if t.chunkThreshold > 0 && file.Size > t.chunkThreshold {
+		_, err := t.UploadChunkedFile(ctx, groupID, topicID, file)
+		return err
+	}
+
 	accessHash, _ := t.getAccessHash(groupID)
 	inputPeer := &tg.InputPeerChannel{
 		ChannelID:  groupID,
@@ -314,15 +371,120 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	return nil
 }
 
+// UploadChunkedFile uploads a logical file as ordered Telegram document chunks.
+func (t *TelegramClient) UploadChunkedFile(ctx context.Context, groupID, topicID int64, file domain.LocalFile) ([]int, error) {
+	plan := chunkPlan(file.Size, t.chunkThreshold, t.chunkSize)
+	if len(plan) == 0 {
+		return nil, fmt.Errorf("invalid chunk plan for %s", file.Path)
+	}
+
+	inputPeer := &tg.InputPeerChannel{ChannelID: groupID, AccessHash: t.getCachedAccessHash(groupID)}
+	fd, err := os.Open(file.AbsPath)
+	if err != nil {
+		return nil, fmt.Errorf("open file for chunking: %w", err)
+	}
+	defer fd.Close()
+
+	var task domain.ProgressTask
+	if t.progressTracker != nil {
+		task = t.progressTracker.Start(file.Path, file.Size)
+	}
+	uploadedIDs := make([]int, 0, len(plan))
+	var completed int64
+	for index, chunk := range plan {
+		if task != nil {
+			task.SetChunk(index+1, len(plan))
+		}
+		messageID, uploadErr := t.uploadChunk(ctx, inputPeer, topicID, fd, file, chunk, index, completed, task)
+		if uploadErr != nil {
+			if task != nil {
+				task.Abort()
+			}
+			for _, uploadedID := range uploadedIDs {
+				if deleteErr := t.DeleteFile(ctx, groupID, topicID, uploadedID); deleteErr != nil {
+					log.Printf("Warning: failed to clean up chunk %d: %v", uploadedID, deleteErr)
+				}
+			}
+			return nil, uploadErr
+		}
+		uploadedIDs = append(uploadedIDs, messageID)
+		completed += chunk.Length
+	}
+	if task != nil {
+		task.Complete()
+	}
+	return uploadedIDs, nil
+}
+
+func (t *TelegramClient) uploadChunk(ctx context.Context, peer *tg.InputPeerChannel, topicID int64, file *os.File, local domain.LocalFile, chunk chunkRange, index int, base int64, task domain.ProgressTask) (int, error) {
+	uploadID, err := crypto.RandInt64(crypto.DefaultRand())
+	if err != nil {
+		return 0, fmt.Errorf("generate upload ID: %w", err)
+	}
+	reader := io.NewSectionReader(file, chunk.Offset, chunk.Length)
+	t.mu.Lock()
+	if t.progressStarts == nil {
+		t.progressStarts = make(map[int64]time.Time)
+	}
+	if t.progressTasks == nil {
+		t.progressTasks = make(map[int64]domain.ProgressTask)
+	}
+	if t.progressBases == nil {
+		t.progressBases = make(map[int64]int64)
+	}
+	t.progressStarts[uploadID] = time.Now()
+	t.progressBases[uploadID] = base
+	if task != nil {
+		t.progressTasks[uploadID] = task
+	}
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		delete(t.progressStarts, uploadID)
+		delete(t.progressTasks, uploadID)
+		delete(t.progressBases, uploadID)
+		t.mu.Unlock()
+	}()
+
+	u, err := t.uploader.WithIDGenerator(func() (int64, error) { return uploadID, nil }).FromReader(ctx, filepath.Base(local.Path), reader)
+	if err != nil {
+		return 0, fmt.Errorf("upload chunk %d: %w", index, err)
+	}
+	meta := domain.FileMeta{Path: local.Path, Checksum: local.Checksum, ModTime: local.ModTime, Flags: domain.ChunkFlag, Idx: index}
+	captionBytes, err := json.Marshal(meta)
+	if err != nil {
+		return 0, fmt.Errorf("marshal chunk metadata: %w", err)
+	}
+	mimeType := mime.TypeByExtension(filepath.Ext(local.Path))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	sent, err := t.sender.To(peer).Reply(int(topicID)).Media(ctx, message.UploadedDocument(u, styling.Plain(string(captionBytes))).MIME(mimeType).Filename(filepath.Base(local.Path)))
+	if err != nil {
+		return 0, fmt.Errorf("send chunk %d: %w", index, err)
+	}
+	messageID, ok := messageIDFromUpdates(sent)
+	if !ok {
+		return 0, fmt.Errorf("chunk %d message ID not found", index)
+	}
+	return messageID, nil
+}
+
+func (t *TelegramClient) getCachedAccessHash(groupID int64) int64 {
+	accessHash, _ := t.getAccessHash(groupID)
+	return accessHash
+}
+
 // Chunk implements uploader.Progress interface.
 func (t *TelegramClient) Chunk(ctx context.Context, state uploader.ProgressState) error {
 	t.mu.RLock()
 	task, hasTask := t.progressTasks[state.ID]
 	startTime, hasStart := t.progressStarts[state.ID]
+	base := t.progressBases[state.ID]
 	t.mu.RUnlock()
 
 	if hasTask {
-		task.SetCurrent(state.Uploaded)
+		task.SetCurrent(base + state.Uploaded)
 	}
 
 	if state.Total > 0 {
@@ -360,6 +522,16 @@ func formatSize(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
+// DeleteChunkedFile deletes every Telegram message belonging to a logical file.
+func (t *TelegramClient) DeleteChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int) error {
+	for _, messageID := range chunkIDs {
+		if err := t.DeleteFile(ctx, groupID, topicID, messageID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
 	accessHash, _ := t.getAccessHash(groupID)
 	inputChannel := &tg.InputChannel{
@@ -372,6 +544,13 @@ func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID 
 		ID:      []int{messageID},
 	})
 	return err
+}
+
+// DownloadChunkedFile returns a lazy reader that concatenates chunk messages in order.
+func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
+	return newChunkReader(chunkIDs, func(messageID int) (io.ReadCloser, error) {
+		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size)
+	}), nil
 }
 
 func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
