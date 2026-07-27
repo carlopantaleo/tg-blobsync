@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gotd/td/bin"
 	"github.com/gotd/td/telegram/message"
+	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 )
 
@@ -249,6 +251,53 @@ func TestTelegramClient_ResolveGroup_Success(t *testing.T) {
 	// Check cache
 	if hash, ok := client.getAccessHash(100); !ok || hash != 999 {
 		t.Errorf("AccessHash not cached correctly")
+	}
+}
+
+func TestTelegramClient_UploadChunkedFile_Retry(t *testing.T) {
+	// Create a dummy temp file
+	tmpFile, err := os.CreateTemp("", "large.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write(make([]byte, 20))
+	tmpFile.Close()
+
+	mockInvoker := NewMockInvoker()
+
+	client := &TelegramClient{
+		api:            tg.NewClient(mockInvoker),
+		peerCache:      make(map[int64]int64),
+		progressStarts: make(map[int64]time.Time),
+		progressTasks:  make(map[int64]domain.ProgressTask),
+		// sender and uploader need to be properly set up or mocked to fail.
+		chunkThreshold: 10,
+		chunkSize:      10,
+	}
+	client.uploader = uploader.NewUploader(client.api)
+	client.sender = message.NewSender(client.api)
+
+	// Intercept the upload RPC and count how many times it was called
+	attempts := 0
+	mockInvoker.Register(&tg.UploadSaveBigFilePartRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
+		attempts++
+		return errors.New("simulated network error")
+	})
+
+	_, err = client.UploadChunkedFile(context.Background(), 100, 200, domain.LocalFile{
+		Path:    "large.txt",
+		AbsPath: tmpFile.Name(),
+		Size:    20,
+	})
+
+	if err == nil {
+		t.Fatal("Expected error due to simulated network error, got nil")
+	}
+
+	// Because of WithRetry, attempts should be more than 1
+	if attempts <= 1 {
+		t.Errorf("Expected multiple attempts due to retry, got %d", attempts)
 	}
 }
 

@@ -5,9 +5,9 @@
 
 ## 2. Testing (Red Phase)
 
-- [ ] 2.1 Write failing unit tests in `internal/adapter/telegram/files_test.go` simulating a chunked upload failure and verifying the retry behavior.
-- [ ] 2.2 Run the tests and ensure they fail (Red).
-- [ ] 2.3 Commit milestone: Add failing tests for chunked upload retry
+- [x] 2.1 Write failing unit tests in `internal/adapter/telegram/files_test.go` simulating a chunked upload failure and verifying the retry behavior.
+- [x] 2.2 Run the tests and ensure they fail (Red).
+- [x] 2.3 Commit milestone: Add failing tests for chunked upload retry
 
 ## 3. Implementation (Green Phase)
 
