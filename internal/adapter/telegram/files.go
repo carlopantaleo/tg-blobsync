@@ -123,11 +123,11 @@ func groupChunkFiles(files []domain.RemoteFile) []domain.RemoteFile {
 }
 
 func isCompleteChunkSet(chunks []domain.RemoteFile) bool {
-	if len(chunks) == 0 || chunks[0].Meta.Idx != 0 {
+	if len(chunks) == 0 || chunks[0].Meta.Idx != 1 {
 		return false
 	}
 	for index, chunk := range chunks {
-		if chunk.Meta.Idx != index {
+		if chunk.Meta.Idx != index+1 {
 			return false
 		}
 	}
@@ -353,7 +353,8 @@ func (t *TelegramClient) UploadChunkedFile(ctx context.Context, groupID, topicID
 		if task != nil {
 			task.SetChunk(index+1, len(plan))
 		}
-		messageID, uploadErr := t.uploadChunk(ctx, inputPeer, topicID, fd, file, chunk, index, completed, task)
+		// Pass index+1 to start Idx at 1 instead of 0
+		messageID, uploadErr := t.uploadChunk(ctx, inputPeer, topicID, fd, file, chunk, index+1, completed, task)
 		if uploadErr != nil {
 			if task != nil {
 				task.Abort()

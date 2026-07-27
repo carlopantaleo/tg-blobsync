@@ -33,7 +33,7 @@ The system SHALL maintain, for each topic, a single INDEX message that is the mo
 - **THEN** the corresponding index entry SHALL have `size` equal to 0 and `flags` equal to `EMPTY_FILE`
 
 ### Requirement: Remote state recovery from the index
-The system SHALL recover the remote state of a topic from the index when the last message of the topic is the INDEX message, without paginating through all topic messages. For chunked entries, the recovered `RemoteFile` SHALL carry the `chunkIDs` list and the total logical size, and SHALL NOT be expanded into multiple files. If the Telegram history request used to inspect the latest topic message returns `FLOOD_WAIT (N)`, the system SHALL wait N seconds and retry the same request before returning an error.
+The system SHALL recover the remote state of a topic from the index when the last message of the topic is the INDEX message, without paginating through all topic messages. For chunked entries, the recovered `RemoteFile` SHALL carry the `chunkIDs` list and the total logical size, and SHALL NOT be expanded into multiple files. If the Telegram history request used to inspect the latest topic message returns `FLOOD_WAIT (N)`, the system SHALL wait N seconds and retry the same request before returning an error. The system SHALL centralize index reading so that any operation that requires a remote file list (such as interactive path resolution during `push` or `pull`, `browse`, and `group totals`) uses the index if present, falling back to legacy pagination only if absent.
 
 #### Scenario: Fast path recovery
 - **WHEN** the last message of the topic is the INDEX message
@@ -78,6 +78,11 @@ The system SHALL recover the remote state of a topic from the index when the las
 - **THEN** the system SHALL prompt the user once asking whether to create indexes for all topics without one
 - **AND** if the user confirms, the system SHALL run the legacy fallback migration for each topic without an index before computing totals
 - **AND** if the user declines, the system SHALL compute totals for those topics using the legacy `ListFiles` pagination
+
+#### Scenario: Index used by interactive path resolution
+- **WHEN** the user is interactively prompted to select a remote sub-directory for `push` or `pull`
+- **THEN** the system SHALL build the list of existing sub-directories from the topic index if present
+- **AND** the system SHALL fall back to the legacy pagination without prompting if the index is absent
 
 ### Requirement: Legacy fallback and automatic migration
 The system SHALL fall back to the legacy pagination flow when the last message of the topic is not the INDEX message. During the fallback, the system SHALL delete any stale INDEX messages found in the topic and SHALL create a fresh INDEX message as the last message of the topic before proceeding with synchronization. The fallback SHALL group chunk messages into logical files and record their `chunkIDs` in the rebuilt index. Every history page request SHALL use the shared FLOOD_WAIT-aware retry policy.

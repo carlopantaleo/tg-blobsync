@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"testing"
 
@@ -30,9 +31,10 @@ func TestResolveIdentifiersWithNames(t *testing.T) {
 		topicByName: &domain.Topic{ID: 99, Title: "MyTopic"},
 		files:       []domain.RemoteFile{{Meta: domain.FileMeta{Path: "subdir/file.txt"}, Size: 10}},
 	}
+	blobStorage := &stubBlobStorage{}
 	console := &stubConsole{subdir: "chosen"}
 
-	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
+	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,9 +55,10 @@ func TestResolveIdentifiersWithIDs(t *testing.T) {
 	storage := &stubTelegram{
 		files: []domain.RemoteFile{{Meta: domain.FileMeta{Path: "dir/file.txt"}, Size: 5}},
 	}
+	blobStorage := &stubBlobStorage{}
 	console := &stubConsole{subdir: ""}
 
-	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
+	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,13 +155,111 @@ func (s *stubTelegram) GroupTotals(_ context.Context, _ int64) (domain.GroupTota
 	return domain.GroupTotals{}, nil
 }
 
+type stubBlobStorage struct {
+	index *domain.FileIndex
+}
+
+func (s *stubBlobStorage) GetIndex(ctx context.Context, groupID int64, topicID int64) (*domain.FileIndex, int, bool, error) {
+	if s.index != nil {
+		return s.index, 1, true, nil
+	}
+	return nil, 0, false, nil
+}
+
+func (s *stubBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicID int64, index domain.FileIndex) (int, error) {
+	return 0, nil
+}
+
+func (s *stubBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+	return nil
+}
+
+func (s *stubBlobStorage) UploadChunkedFile(ctx context.Context, groupID, topicID int64, file domain.LocalFile) error {
+	return nil
+}
+
+func (s *stubBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
+	return nil
+}
+
+func (s *stubBlobStorage) DeleteChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int) error {
+	return nil
+}
+
+func (s *stubBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) Close() error {
+	return nil
+}
+
+func (s *stubBlobStorage) GroupTotals(ctx context.Context, groupID int64) (domain.GroupTotals, error) {
+	return domain.GroupTotals{}, nil
+}
+
+func (s *stubBlobStorage) ListGroups(ctx context.Context) ([]domain.Group, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) ListTopics(ctx context.Context, groupID int64) ([]domain.Topic, error) {
+	return nil, nil
+}
+
+func (s *stubBlobStorage) SetProgressTracker(t domain.ProgressTracker) {}
+func (s *stubBlobStorage) Start(ctx context.Context) error             { return nil }
+
+func TestResolveIdentifiers_SubDirUsesIndex(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.CLIConfig{Command: "push", GroupName: "1", TopicName: "2"}
+	storage := &stubTelegram{}
+	blobStorage := &stubBlobStorage{
+		index: &domain.FileIndex{
+			Entries: []domain.FileIndexEntry{
+				{Path: "indexed_dir/file.txt"},
+			},
+		},
+	}
+	console := &stubConsole{subdir: "indexed_dir"}
+
+	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if groupID != 1 || topicID != 2 {
+		t.Fatalf("unexpected ids: %d %d", groupID, topicID)
+	}
+	if cfg.SubDir != "indexed_dir" {
+		t.Fatalf("expected subdir 'indexed_dir', got %q", cfg.SubDir)
+	}
+	if storage.listFilesCalled {
+		t.Fatalf("expected ListFiles not to be called when index is present")
+	}
+	if !console.selectSubdirCalled {
+		t.Fatalf("expected selectSubdir to be called")
+	}
+}
+
 func TestResolveIdentifiers_GroupNotFound(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.CLIConfig{Command: "push", GroupName: "Unknown"}
 	storage := &stubTelegram{}
+	blobStorage := &stubBlobStorage{}
 	console := &stubConsole{}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err == nil {
 		t.Fatalf("expected error when group not found")
 	}
@@ -168,9 +269,10 @@ func TestResolveIdentifiers_TopicNotFound(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.CLIConfig{Command: "push", GroupName: "MyGroup", TopicName: "Missing"}
 	storage := &stubTelegram{groupByName: &domain.Group{ID: 7, Title: "MyGroup"}}
+	blobStorage := &stubBlobStorage{}
 	console := &stubConsole{}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err == nil {
 		t.Fatalf("expected error when topic not found")
 	}
@@ -180,9 +282,10 @@ func TestResolveIdentifiers_BackFromSubdir(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.CLIConfig{Command: "pull", GroupName: "1", TopicName: "2"}
 	storage := &stubTelegram{files: []domain.RemoteFile{{Meta: domain.FileMeta{Path: "d/f"}, Size: 1}}}
+	blobStorage := &stubBlobStorage{}
 	console := &stubConsole{subdirErr: fmt.Errorf("back")}
 
-	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, nil, console)
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err == nil || err.Error() != "back" {
 		t.Fatalf("expected back error, got %v", err)
 	}

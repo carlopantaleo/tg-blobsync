@@ -7,12 +7,12 @@ Defines how files exceeding the configured chunk threshold are transparently spl
 ## Requirements
 
 ### Requirement: Chunked file representation
-The system SHALL represent a logical file larger than the configured chunk threshold as a sequence of Telegram document messages, each carrying a `FileMeta` caption with `Flags` equal to `CHUNK`, the logical file `Path`, `Checksum`, and `ModTime`, and an `Idx` field holding the 0-based position of the chunk within the logical file. The number of chunks SHALL be `ceil(size / chunkSize)` and the last chunk MAY be smaller than `chunkSize`.
+The system SHALL represent a logical file larger than the configured chunk threshold as a sequence of Telegram document messages, each carrying a `FileMeta` caption with `Flags` equal to `CHUNK`, the logical file `Path`, `Checksum`, and `ModTime`, and an `Idx` field holding the 1-based position of the chunk within the logical file. The `Idx` field SHALL be explicitly included in the serialized JSON metadata for all chunks, starting with `Idx=1` for the first chunk. The number of chunks SHALL be `ceil(size / chunkSize)` and the last chunk MAY be smaller than `chunkSize`.
 
 #### Scenario: File above threshold is split
 - **WHEN** a local file with size greater than `chunkThreshold` is uploaded
 - **THEN** the system SHALL upload one Telegram document message per chunk
-- **AND** each chunk message caption SHALL have `Flags` equal to `CHUNK` and a unique `Idx` starting at 0 and increasing by 1 per chunk
+- **AND** each chunk message caption SHALL have `Flags` equal to `CHUNK` and a unique `Idx` starting at 1 and increasing by 1 per chunk
 - **AND** every chunk message caption SHALL carry the same logical `Path`, `Checksum`, and `ModTime`
 
 #### Scenario: File at or below threshold is not chunked
@@ -22,6 +22,10 @@ The system SHALL represent a logical file larger than the configured chunk thres
 #### Scenario: Empty file is never chunked
 - **WHEN** a 0-byte local file is uploaded
 - **THEN** the system SHALL upload a single `EMPTY_FILE` message and SHALL NOT produce any chunk
+
+#### Scenario: First chunk explicitly serializes its index
+- **WHEN** the system serializes the metadata for the first chunk of a chunked file
+- **THEN** the JSON output SHALL explicitly contain `"i": 1` and SHALL NOT omit the field
 
 ### Requirement: Chunked file download and reassembly
 The system SHALL download a chunked logical file by fetching its chunk messages in `Idx` order and concatenating their bytes into the destination file, exposing a single `io.ReadCloser` to the caller without buffering the whole file in memory.
