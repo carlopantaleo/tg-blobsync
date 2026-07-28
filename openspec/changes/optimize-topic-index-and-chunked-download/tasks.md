@@ -18,15 +18,15 @@
 
 ## 3. Chunked Pull Progress (Red-Green-Refactor)
 
-- [ ] 3.1 Write failing tests proving a chunked pull contributes one logical file to totals and exposes current chunk/total chunk progress.
-- [ ] 3.2 Write failing tests proving non-chunked pull progress remains unchanged.
-- [ ] 3.3 Run the focused tests and verify they fail (Red).
-- [ ] 3.4 Implement logical-file progress aggregation in the executor and UI progress reporting for chunked downloads.
-- [ ] 3.5 Ensure chunk completion does not increment the completed-file counter and errors identify the affected chunk.
-- [ ] 3.6 Run focused tests and verify they pass (Green).
-- [ ] 3.7 Refactor progress handling to share logical-file behavior between single-file and chunked downloads.
-- [ ] 3.8 Run the focused tests again after refactoring.
-- [ ] 3.9 Commit milestone: Fix chunked pull progress aggregation
+- [x] 3.1 Write failing tests proving a chunked pull contributes one logical file to totals and exposes current chunk/total chunk progress.
+- [x] 3.2 Write failing tests proving non-chunked pull progress remains unchanged.
+- [x] 3.3 Run the focused tests and verify they fail (Red).
+- [x] 3.4 Implement logical-file progress aggregation in the executor and UI progress reporting for chunked downloads.
+- [x] 3.5 Ensure chunk completion does not increment the completed-file counter and errors identify the affected chunk.
+- [x] 3.6 Run focused tests and verify they pass (Green).
+- [x] 3.7 Refactor progress handling to share logical-file behavior between single-file and chunked downloads.
+- [x] 3.8 Run the focused tests again after refactoring.
+- [x] 3.9 Commit milestone: Fix chunked pull progress aggregation
 
 ## 4. Browse Chunked Downloads (Red-Green-Refactor)
 

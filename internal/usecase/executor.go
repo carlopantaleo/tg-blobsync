@@ -198,6 +198,16 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 	remoteFile := item.RemoteFile
 	fullPath := filepath.Join(rootDir, item.Path)
 
+	var task domain.ProgressTask
+	if e.ui != nil {
+		task = e.ui.Start(item.Path, remoteFile.Size)
+	}
+	defer func() {
+		if task != nil {
+			task.Complete()
+		}
+	}()
+
 	operation := func() error {
 		if remoteFile.Meta.Flags == domain.EmptyFileFlag {
 			log.Printf("[*] Restoring empty file: %s", item.Path)
@@ -213,6 +223,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 		var reader io.Reader
 		var closers []io.Closer
 		if len(remoteFile.ChunkIDs) > 0 {
+			totalChunks := len(remoteFile.ChunkIDs)
 			if chunkedStorage, ok := e.storage.(chunkedDownloader); ok {
 				chunkReader, downloadErr := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, remoteFile.ChunkIDs, remoteFile.Meta.Path, remoteFile.Size)
 				if downloadErr != nil {
@@ -226,6 +237,9 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 				if downloadErr != nil {
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
 				}
+			}
+			if task != nil {
+				task.SetChunk(totalChunks, totalChunks)
 			}
 		} else {
 			readers := make([]io.Reader, 0, 1)
