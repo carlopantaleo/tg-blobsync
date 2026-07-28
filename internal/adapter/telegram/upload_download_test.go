@@ -202,7 +202,7 @@ func TestTelegramClient_DownloadFile(t *testing.T) {
 		return output.Decode(buf)
 	})
 
-	rc, err := client.DownloadFile(context.Background(), 100, 200, 123, "test.txt", 10)
+	rc, err := client.DownloadFile(context.Background(), 100, 200, 123, "test.txt", 10, nil)
 	if err != nil {
 		t.Fatalf("DownloadFile failed: %v", err)
 	}

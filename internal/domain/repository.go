@@ -84,7 +84,7 @@ type BlobStorage interface {
 	ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error)
 	UploadFile(ctx context.Context, groupID int64, topicID int64, file LocalFile) ([]int, error)
 	DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error
-	DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error)
+	DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task ProgressTask) (io.ReadCloser, error)
 
 	// Lifecycle
 	Close() error

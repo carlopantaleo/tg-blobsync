@@ -80,7 +80,7 @@ func (d *SingleDownloader) openDownloadReader(ctx context.Context, file domain.R
 	if len(file.ChunkIDs) > 0 {
 		return d.openChunkedDownloadReader(ctx, file, groupID, topicID, task)
 	}
-	rc, err := d.storage.DownloadFile(ctx, groupID, topicID, file.MessageID, file.Meta.Path, file.Size)
+	rc, err := d.storage.DownloadFile(ctx, groupID, topicID, file.MessageID, file.Meta.Path, file.Size, task)
 	if err != nil {
 		return nil, nil, fmt.Errorf("download failed: %w", err)
 	}
@@ -89,12 +89,9 @@ func (d *SingleDownloader) openDownloadReader(ctx context.Context, file domain.R
 
 func (d *SingleDownloader) openChunkedDownloadReader(ctx context.Context, file domain.RemoteFile, groupID, topicID int64, task domain.ProgressTask) (io.Reader, []io.Closer, error) {
 	if chunkedStorage, ok := d.storage.(chunkedDownloader); ok {
-		rc, err := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, file.ChunkIDs, file.Meta.Path, file.Size)
+		rc, err := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, file.ChunkIDs, file.Meta.Path, file.Size, task)
 		if err != nil {
 			return nil, nil, fmt.Errorf("download failed: %w", err)
-		}
-		if task != nil {
-			task.SetChunk(len(file.ChunkIDs), len(file.ChunkIDs))
 		}
 		return rc, []io.Closer{rc}, nil
 	}
@@ -102,16 +99,16 @@ func (d *SingleDownloader) openChunkedDownloadReader(ctx context.Context, file d
 	readers := make([]io.Reader, 0, len(file.ChunkIDs))
 	closers := make([]io.Closer, 0, len(file.ChunkIDs))
 	for idx, messageID := range file.ChunkIDs {
-		rc, err := d.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size)
+		if task != nil {
+			task.SetChunk(idx+1, len(file.ChunkIDs))
+		}
+		rc, err := d.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size, task)
 		if err != nil {
 			closeReaders(closers)
 			return nil, nil, fmt.Errorf("download chunk %d/%d failed: %w", idx+1, len(file.ChunkIDs), err)
 		}
 		readers = append(readers, rc)
 		closers = append(closers, rc)
-	}
-	if task != nil {
-		task.SetChunk(len(file.ChunkIDs), len(file.ChunkIDs))
 	}
 	return io.MultiReader(readers...), closers, nil
 }

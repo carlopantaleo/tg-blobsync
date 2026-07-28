@@ -170,11 +170,11 @@ func (s *stubBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicI
 	return 0, nil
 }
 
-func (s *stubBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (s *stubBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (s *stubBlobStorage) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
+func (s *stubBlobStorage) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	return nil, nil
 }
 

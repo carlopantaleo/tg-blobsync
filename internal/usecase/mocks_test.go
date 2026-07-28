@@ -188,7 +188,7 @@ func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID
 	return nil
 }
 
-func (m *MockBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (m *MockBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("dummy content")), nil
 }
 

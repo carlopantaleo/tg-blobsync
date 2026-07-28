@@ -23,7 +23,7 @@ The current architecture already has an indexed fast path in `scanner.ScanRemote
 - **Apply index changes as a delta:** For indexed topics, update the in-memory `FileIndex` by removing deleted/replaced entries and adding uploaded entries, then upload one new index. Delete only the known previous index message. For legacy topics, retain migration/full scan behavior.
 - **Cache only within one operation:** Reuse topic/index data during a single command invocation. Avoid a global cache because uploads, deletes, and concurrent commands make invalidation unsafe.
 - **Centralize chunk-aware download:** Use one download path that accepts a logical `RemoteFile`; single files download by `MessageID`, while chunked files stream `ChunkIDs` in order. Browse will return the same logical download request used by pull.
-- **Aggregate progress at the logical-file boundary:** The executor/UI will create one progress task per logical file and update its chunk position while each chunk is downloaded. Chunk completion must not increment the total file count.
+- **Pass ProgressTask to Storage Layer:** To prevent the `TelegramClient` from spawning redundant progress tasks for individual chunks when `DownloadFile` is called, the logical `ProgressTask` will be passed down to the `BlobStorage` methods (`DownloadFile` and `DownloadChunkedFile`). The storage adapter will use this task to update byte progress and the active chunk index, rather than creating a new file task for each chunk.
 
 ## Risks / Trade-offs
 

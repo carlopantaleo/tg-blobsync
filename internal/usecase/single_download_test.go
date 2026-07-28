@@ -104,9 +104,9 @@ type failingChunkStorage struct {
 	failOnMessageID int
 }
 
-func (m *failingChunkStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (m *failingChunkStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	if messageID == m.failOnMessageID {
 		return nil, io.ErrUnexpectedEOF
 	}
-	return m.MockBlobStorage.DownloadFile(ctx, groupID, topicID, messageID, fileName, size)
+	return m.MockBlobStorage.DownloadFile(ctx, groupID, topicID, messageID, fileName, size, task)
 }

@@ -520,13 +520,19 @@ func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID 
 }
 
 // DownloadChunkedFile returns a lazy reader that concatenates chunk messages in order.
-func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
-	return newChunkReader(chunkIDs, func(messageID int) (io.ReadCloser, error) {
-		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size)
-	}), nil
+// If task is non-nil, the storage layer reports per-chunk progress on it instead of
+// creating a new progress task per chunk.
+func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
+	open := func(messageID int) (io.ReadCloser, error) {
+		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size, task)
+	}
+	if task != nil {
+		return newChunkReaderWithTask(chunkIDs, open, task), nil
+	}
+	return newChunkReader(chunkIDs, open), nil
 }
 
-func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	accessHash, _ := t.getAccessHash(groupID)
 
 	log.Printf("[...] Downloading: %s (%s)", fileName, formatSize(size))
@@ -591,9 +597,11 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	// Pipe for streaming
 	pr, pw := io.Pipe()
 
-	var task domain.ProgressTask
-	if t.progressTracker != nil {
-		task = t.progressTracker.Start(fileName, size)
+	var internalTask domain.ProgressTask
+	if task != nil {
+		internalTask = task
+	} else if t.progressTracker != nil {
+		internalTask = t.progressTracker.Start(fileName, size)
 	}
 
 	var downloadSuccess bool
@@ -602,11 +610,11 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			t.mu.Lock()
 			delete(t.progressStarts, downloadID)
 			t.mu.Unlock()
-			if task != nil {
+			if internalTask != nil {
 				if downloadSuccess {
-					task.Complete()
+					internalTask.Complete()
 				} else {
-					task.Abort()
+					internalTask.Abort()
 				}
 			}
 		}()
@@ -620,7 +628,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			total:     size,
 			lastLog:   0,
 			startTime: time.Now(),
-			task:      task,
+			task:      internalTask,
 		}
 
 		// gotd downloader

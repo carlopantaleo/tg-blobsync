@@ -21,7 +21,7 @@ type SyncExecutor interface {
 }
 
 type chunkedDownloader interface {
-	DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error)
+	DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error)
 }
 
 type executor struct {
@@ -223,9 +223,8 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 		var reader io.Reader
 		var closers []io.Closer
 		if len(remoteFile.ChunkIDs) > 0 {
-			totalChunks := len(remoteFile.ChunkIDs)
 			if chunkedStorage, ok := e.storage.(chunkedDownloader); ok {
-				chunkReader, downloadErr := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, remoteFile.ChunkIDs, remoteFile.Meta.Path, remoteFile.Size)
+				chunkReader, downloadErr := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, remoteFile.ChunkIDs, remoteFile.Meta.Path, remoteFile.Size, task)
 				if downloadErr != nil {
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
 				}
@@ -233,18 +232,15 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 				closers = append(closers, chunkReader)
 			} else {
 				var downloadErr error
-				reader, closers, downloadErr = e.openChunkReaders(ctx, *remoteFile, groupID, topicID)
+				reader, closers, downloadErr = e.openChunkReaders(ctx, *remoteFile, groupID, topicID, task)
 				if downloadErr != nil {
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
 				}
 			}
-			if task != nil {
-				task.SetChunk(totalChunks, totalChunks)
-			}
 		} else {
 			readers := make([]io.Reader, 0, 1)
 			for _, messageID := range remoteMessageIDs(*remoteFile) {
-				rc, downloadErr := e.storage.DownloadFile(ctx, groupID, topicID, messageID, remoteFile.Meta.Path, remoteFile.Size)
+				rc, downloadErr := e.storage.DownloadFile(ctx, groupID, topicID, messageID, remoteFile.Meta.Path, remoteFile.Size, task)
 				if downloadErr != nil {
 					closeReaders(closers)
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
@@ -278,11 +274,14 @@ func closeReaders(readers []io.Closer) {
 	}
 }
 
-func (e *executor) openChunkReaders(ctx context.Context, file domain.RemoteFile, groupID, topicID int64) (io.Reader, []io.Closer, error) {
+func (e *executor) openChunkReaders(ctx context.Context, file domain.RemoteFile, groupID, topicID int64, task domain.ProgressTask) (io.Reader, []io.Closer, error) {
 	readers := make([]io.Reader, 0, len(file.ChunkIDs))
 	closers := make([]io.Closer, 0, len(file.ChunkIDs))
-	for _, messageID := range file.ChunkIDs {
-		reader, err := e.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size)
+	for idx, messageID := range file.ChunkIDs {
+		if task != nil {
+			task.SetChunk(idx+1, len(file.ChunkIDs))
+		}
+		reader, err := e.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size, task)
 		if err != nil {
 			closeReaders(closers)
 			return nil, nil, err
