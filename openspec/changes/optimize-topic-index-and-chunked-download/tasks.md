@@ -42,9 +42,9 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run the complete Go test suite and resolve regressions.
-- [ ] 5.2 Run formatting and static checks used by the repository.
-- [ ] 5.3 Review the final diff against the proposal, design, and specs.
+- [x] 5.1 Run the complete Go test suite and resolve regressions.
+- [x] 5.2 Run formatting and static checks used by the repository.
+- [x] 5.3 Review the final diff against the proposal, design, and specs.
 - [ ] 5.4 Commit milestone: Verify index and chunked download fixes
 
 ## 6. Fix Chunk Progress Reporting (Red-Green-Refactor)
@@ -54,4 +54,4 @@
 - [x] 6.3 Modify `TelegramClient.DownloadFile` and `DownloadChunkedFile` to suppress internal task creation if a logical task is provided, and update the chunk index dynamically.
 - [x] 6.4 Update `SingleDownloader` and `executor` to pass the logical progress task down to the storage layer.
 - [x] 6.5 Run the tests and verify they pass (Green).
-- [ ] 6.6 Commit milestone: Fix chunk progress reporting in browse and pull
+- [x] 6.6 Commit milestone: Fix chunk progress reporting in browse and pull
