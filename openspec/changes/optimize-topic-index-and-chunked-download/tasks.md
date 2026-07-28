@@ -30,15 +30,15 @@
 
 ## 4. Browse Chunked Downloads (Red-Green-Refactor)
 
-- [ ] 4.1 Write failing tests proving browse lists an indexed chunked entry once and preserves ordered chunk IDs.
-- [ ] 4.2 Write failing tests proving browse download streams chunked files into one destination and rejects incomplete chunks.
-- [ ] 4.3 Run the focused tests and verify they fail (Red).
-- [ ] 4.4 Implement browse download dispatch through the logical `RemoteFile` download/reassembly path.
-- [ ] 4.5 Ensure indexed and legacy browse results use the same chunk-aware download behavior without loading the whole file into memory.
-- [ ] 4.6 Run focused tests and verify they pass (Green).
-- [ ] 4.7 Refactor browse and download flow to avoid duplicate chunk handling.
-- [ ] 4.8 Run the focused tests again after refactoring.
-- [ ] 4.9 Commit milestone: Support browse downloads for chunked files
+- [x] 4.1 Write failing tests proving browse lists an indexed chunked entry once and preserves ordered chunk IDs.
+- [x] 4.2 Write failing tests proving browse download streams chunked files into one destination and rejects incomplete chunks.
+- [x] 4.3 Run the focused tests and verify they fail (Red).
+- [x] 4.4 Implement browse download dispatch through the logical `RemoteFile` download/reassembly path.
+- [x] 4.5 Ensure indexed and legacy browse results use the same chunk-aware download behavior without loading the whole file into memory.
+- [x] 4.6 Run focused tests and verify they pass (Green).
+- [x] 4.7 Refactor browse and download flow to avoid duplicate chunk handling.
+- [x] 4.8 Run the focused tests again after refactoring.
+- [x] 4.9 Commit milestone: Support browse downloads for chunked files
 
 ## 5. Verification
 
