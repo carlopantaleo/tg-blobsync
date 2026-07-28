@@ -42,7 +42,7 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run the complete Go test suite and resolve regressions.
-- [ ] 5.2 Run formatting and static checks used by the repository.
-- [ ] 5.3 Review the final diff against the proposal, design, and specs.
-- [ ] 5.4 Commit milestone: Verify index and chunked download fixes
+- [x] 5.1 Run the complete Go test suite and resolve regressions.
+- [x] 5.2 Run formatting and static checks used by the repository.
+- [x] 5.3 Review the final diff against the proposal, design, and specs.
+- [x] 5.4 Commit milestone: Verify index and chunked download fixes
