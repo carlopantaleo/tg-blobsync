@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"tg-blobsync/internal/domain"
 	"tg-blobsync/internal/pkg/retry"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 type SyncExecutor interface {
-	Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error
+	Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) (domain.SyncResult, error)
 	SetSubDir(subDir string)
 }
 
@@ -29,6 +30,8 @@ type executor struct {
 	workers int
 	ui      domain.UserInterface
 	subDir  string
+	mu      sync.Mutex
+	result  domain.SyncResult
 }
 
 func NewExecutor(fs domain.FileSystem, storage domain.BlobStorage, workers int, ui domain.UserInterface) SyncExecutor {
@@ -47,25 +50,25 @@ func (e *executor) SetSubDir(subDir string) {
 	e.subDir = subDir
 }
 
-func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error {
+func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) (domain.SyncResult, error) {
 	if plan.Summary.Total == 0 {
 		msg := "Everything is up to date."
 		log.Println(msg)
 		if e.ui != nil {
 			_ = e.ui.WaitForInput(msg)
 		}
-		return nil
+		return domain.SyncResult{}, nil
 	}
 
 	// User Confirmation
 	if e.ui != nil {
 		confirmed, err := e.ui.ConfirmSync(plan)
 		if err != nil {
-			return err
+			return domain.SyncResult{}, err
 		}
 		if !confirmed {
 			log.Println("Sync cancelled by user.")
-			return nil
+			return domain.SyncResult{}, nil
 		}
 	}
 
@@ -101,7 +104,7 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 	}
 
 	if err := g.Wait(); err != nil {
-		return err
+		return e.result, err
 	}
 
 	// Execute Deletions
@@ -116,7 +119,7 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 		_ = e.ui.WaitForInput("Sync completed.")
 	}
 
-	return nil
+	return e.result, nil
 }
 
 func (e *executor) processItem(ctx context.Context, item domain.SyncItem, rootDir string, groupID, topicID int64) error {
@@ -146,10 +149,34 @@ func (e *executor) upload(ctx context.Context, item domain.SyncItem, groupID, to
 		uploadFile.Path = item.Path
 	}
 
-	err := e.storage.UploadFile(ctx, groupID, topicID, uploadFile)
+	messageIDs, err := e.storage.UploadFile(ctx, groupID, topicID, uploadFile)
 	if err != nil {
 		return fmt.Errorf("error uploading file %s: %w", item.Path, err)
 	}
+
+	// Record the upload result for delta-based index updates
+	flags := ""
+	if uploadFile.Size == 0 {
+		flags = domain.EmptyFileFlag
+	}
+	if len(messageIDs) > 1 {
+		flags = domain.ChunkFlag
+	}
+	entry := domain.UploadedFile{
+		Path:     uploadFile.Path,
+		Checksum: uploadFile.Checksum,
+		ModTime:  uploadFile.ModTime,
+		Flags:    flags,
+		Size:     uploadFile.Size,
+	}
+	if len(messageIDs) > 1 {
+		entry.ChunkIDs = messageIDs
+	} else if len(messageIDs) == 1 {
+		entry.MessageID = messageIDs[0]
+	}
+	e.mu.Lock()
+	e.result.Uploaded = append(e.result.Uploaded, entry)
+	e.mu.Unlock()
 
 	// If it was an update (RemoteFile exists), delete the old version on Telegram
 	if item.RemoteFile != nil {
@@ -269,6 +296,10 @@ func (e *executor) deleteRemote(ctx context.Context, item domain.SyncItem, group
 			return err
 		}
 	}
+	remotePath := item.RemoteFile.Meta.Path
+	e.mu.Lock()
+	e.result.Deleted = append(e.result.Deleted, domain.DeletedFile{Path: remotePath})
+	e.mu.Unlock()
 	return nil
 }
 

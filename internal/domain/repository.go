@@ -82,7 +82,7 @@ type BlobStorage interface {
 	GetIndex(ctx context.Context, groupID int64, topicID int64) (*FileIndex, int, bool, error)
 	UploadIndex(ctx context.Context, groupID int64, topicID int64, index FileIndex) (int, error)
 	ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error)
-	UploadFile(ctx context.Context, groupID int64, topicID int64, file LocalFile) error
+	UploadFile(ctx context.Context, groupID int64, topicID int64, file LocalFile) ([]int, error)
 	DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error
 	DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error)
 

@@ -32,7 +32,7 @@ func TestExecutor_Execute(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToUpload: 1},
 	}
 
-	if err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(Upload) failed: %v", err)
 	}
 
@@ -49,7 +49,7 @@ func TestExecutor_Execute(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToDownload: 1},
 	}
 
-	if err := executor.Execute(ctx, planDownload, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planDownload, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(Download) failed: %v", err)
 	}
 
@@ -76,7 +76,7 @@ func TestExecutor_Execute(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToDelete: 1},
 	}
 
-	if err := executor.Execute(ctx, planDelLocal, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planDelLocal, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(DeleteLocal) failed: %v", err)
 	}
 	if _, ok := mockFS.Data[delPath]; ok {
@@ -85,7 +85,7 @@ func TestExecutor_Execute(t *testing.T) {
 
 	// 4. Test User Cancel
 	mockUI.Confirmed = false
-	if err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(Cancel) failed: %v", err)
 	}
 	// Should log "cancelled" and return nil
@@ -93,7 +93,7 @@ func TestExecutor_Execute(t *testing.T) {
 	// 5. Test Upload with SubDir
 	mockUI.Confirmed = true
 	executor.SetSubDir("remote-subdir")
-	if err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planUpload, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(Upload with SubDir) failed: %v", err)
 	}
 
@@ -129,7 +129,7 @@ func TestExecutor_Execute(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToDownload: 1},
 	}
 
-	if err := executor.Execute(ctx, planDownloadSubDir, rootDir, groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, planDownloadSubDir, rootDir, groupID, topicID); err != nil {
 		t.Errorf("Execute(Download with SubDir) failed: %v", err)
 	}
 
@@ -145,7 +145,7 @@ func TestExecutor_ChunkedDownloadAndDelete(t *testing.T) {
 	executor := NewExecutor(fs, storage, 1, &MockUserInterface{Confirmed: true})
 	remote := domain.RemoteFile{Meta: domain.FileMeta{Path: "large.bin"}, ChunkIDs: []int{10, 11}, Size: 20}
 	plan := domain.SyncPlan{Items: []domain.SyncItem{{Path: "large.bin", Action: domain.ActionDownload, RemoteFile: &remote}}, Summary: domain.SyncSummary{Total: 1}}
-	if err := executor.Execute(context.Background(), plan, "root", 1, 2); err != nil {
+	if _, err := executor.Execute(context.Background(), plan, "root", 1, 2); err != nil {
 		t.Fatalf("chunked download: %v", err)
 	}
 	if got := string(fs.Data[filepath.Join("root", "large.bin")]); got != "dummy contentdummy content" {
@@ -153,7 +153,7 @@ func TestExecutor_ChunkedDownloadAndDelete(t *testing.T) {
 	}
 
 	deletePlan := domain.SyncPlan{Items: []domain.SyncItem{{Path: "large.bin", Action: domain.ActionDeleteRemote, RemoteFile: &remote}}, Summary: domain.SyncSummary{Total: 1}}
-	if err := executor.Execute(context.Background(), deletePlan, "root", 1, 2); err != nil {
+	if _, err := executor.Execute(context.Background(), deletePlan, "root", 1, 2); err != nil {
 		t.Fatalf("chunked delete: %v", err)
 	}
 	if len(storage.DeletedIDs) != 2 || storage.DeletedIDs[0] != 10 || storage.DeletedIDs[1] != 11 {
@@ -179,7 +179,7 @@ func TestExecutor_DeleteRemote(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToDelete: 1},
 	}
 
-	if err := executor.Execute(ctx, plan, "root", groupID, topicID); err != nil {
+	if _, err := executor.Execute(ctx, plan, "root", groupID, topicID); err != nil {
 		t.Fatalf("Execute(DeleteRemote) error: %v", err)
 	}
 	if mockStorage.LastDeleted.MessageID != 99 || mockStorage.LastDeleted.GroupID != groupID || mockStorage.LastDeleted.TopicID != topicID {

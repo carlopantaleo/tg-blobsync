@@ -140,3 +140,26 @@ type SyncSummary struct {
 	Total      int
 	TotalSize  int64
 }
+
+// UploadedFile records the outcome of an upload operation for index delta updates.
+type UploadedFile struct {
+	Path      string
+	Checksum  string
+	ModTime   int64
+	Flags     string
+	Size      int64
+	MessageID int
+	ChunkIDs  []int
+}
+
+// DeletedFile records the path of a remote file that was deleted.
+type DeletedFile struct {
+	Path string
+}
+
+// SyncResult captures the operations completed during synchronization,
+// enabling delta-based index updates without rereading the topic.
+type SyncResult struct {
+	Uploaded []UploadedFile
+	Deleted  []DeletedFile
+}

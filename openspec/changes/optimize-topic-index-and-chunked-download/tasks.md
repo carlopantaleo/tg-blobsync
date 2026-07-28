@@ -1,20 +1,20 @@
 ## 1. Setup
 
 - [x] 1.1 Create and checkout fix branch `fix/optimize-topic-index-and-chunked-download`
-- [ ] 1.2 Commit milestone: Set up topic index and chunked download fixes
+- [x] 1.2 Commit milestone: Set up topic index and chunked download fixes
 
 ## 2. Indexed Synchronization Delta (Red-Green-Refactor)
 
-- [ ] 2.1 Write failing tests proving indexed synchronization does not call full-topic listing during post-sync index update and reuses the known index message ID.
-- [ ] 2.2 Write failing tests for applying upload, update, and delete operations to the retained index snapshot.
-- [ ] 2.3 Run the focused tests and verify they fail (Red).
-- [ ] 2.4 Implement an operation-scoped indexed remote snapshot and typed synchronization delta for index maintenance.
-- [ ] 2.5 Update synchronization/index rebuild logic to apply deltas for indexed topics and preserve full-scan fallback for legacy topics.
-- [ ] 2.6 Ensure stale-index discovery and duplicate topic reads remain bounded and errors are propagated correctly.
-- [ ] 2.7 Run focused tests and verify they pass (Green).
-- [ ] 2.8 Refactor the index update flow for clear ownership and minimal repeated data fetching.
-- [ ] 2.9 Run the focused tests again after refactoring.
-- [ ] 2.10 Commit milestone: Optimize indexed synchronization reads
+- [x] 2.1 Write failing tests proving indexed synchronization does not call full-topic listing during post-sync index update and reuses the known index message ID.
+- [x] 2.2 Write failing tests for applying upload, update, and delete operations to the retained index snapshot.
+- [x] 2.3 Run the focused tests and verify they fail (Red).
+- [x] 2.4 Implement an operation-scoped indexed remote snapshot and typed synchronization delta for index maintenance.
+- [x] 2.5 Update synchronization/index rebuild logic to apply deltas for indexed topics and preserve full-scan fallback for legacy topics.
+- [x] 2.6 Ensure stale-index discovery and duplicate topic reads remain bounded and errors are propagated correctly.
+- [x] 2.7 Run focused tests and verify they pass (Green).
+- [x] 2.8 Refactor the index update flow for clear ownership and minimal repeated data fetching.
+- [x] 2.9 Run the focused tests again after refactoring.
+- [x] 2.10 Commit milestone: Optimize indexed synchronization reads
 
 ## 3. Chunked Pull Progress (Red-Green-Refactor)
 
