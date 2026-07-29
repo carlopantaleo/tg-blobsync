@@ -598,10 +598,12 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	pr, pw := io.Pipe()
 
 	var internalTask domain.ProgressTask
+	ownsTask := false
 	if task != nil {
 		internalTask = task
 	} else if t.progressTracker != nil {
 		internalTask = t.progressTracker.Start(fileName, size)
+		ownsTask = true
 	}
 
 	var downloadSuccess bool
@@ -610,7 +612,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			t.mu.Lock()
 			delete(t.progressStarts, downloadID)
 			t.mu.Unlock()
-			if internalTask != nil {
+			if internalTask != nil && ownsTask {
 				if downloadSuccess {
 					internalTask.Complete()
 				} else {
