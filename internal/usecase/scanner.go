@@ -12,6 +12,8 @@ type FileScanner interface {
 	ScanLocal(rootDir string) (map[string]domain.LocalFile, error)
 	ScanRemote(ctx context.Context, groupID, topicID int64) (map[string]domain.RemoteFile, error)
 	RemoteIndexMessageID() int
+	IsIndexed() bool
+	RetainedIndex() *domain.FileIndex
 }
 
 type scanner struct {
@@ -20,6 +22,8 @@ type scanner struct {
 	subDir         string
 	skipMD5        bool
 	indexMessageID int
+	indexed        bool
+	retainedIndex  *domain.FileIndex
 }
 
 func NewScanner(fs domain.FileSystem, storage domain.BlobStorage, subDir string, skipMD5 bool) FileScanner {
@@ -63,9 +67,12 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 	}
 	if indexed {
 		s.indexMessageID = indexMessageID
+		s.indexed = true
+		s.retainedIndex = index
 		return s.remoteMap(index.RemoteFiles()), nil
 	}
 
+	s.indexed = false
 	s.indexMessageID, err = MigrateTopicIndex(ctx, s.storage, groupID, topicID)
 	if err != nil {
 		return nil, err
@@ -79,6 +86,14 @@ func (s *scanner) ScanRemote(ctx context.Context, groupID, topicID int64) (map[s
 
 func (s *scanner) RemoteIndexMessageID() int {
 	return s.indexMessageID
+}
+
+func (s *scanner) IsIndexed() bool {
+	return s.indexed
+}
+
+func (s *scanner) RetainedIndex() *domain.FileIndex {
+	return s.retainedIndex
 }
 
 func (s *scanner) remoteMap(files []domain.RemoteFile) map[string]domain.RemoteFile {

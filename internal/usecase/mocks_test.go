@@ -69,6 +69,10 @@ type MockBlobStorage struct {
 		TopicID   int64
 		MessageID int
 	}
+	ListFilesCalls           int
+	ListIndexMessageIDsCalls int
+	UploadFileCalls          int
+	NextMessageID            int
 }
 
 func NewMockBlobStorage() *MockBlobStorage {
@@ -79,6 +83,7 @@ func NewMockBlobStorage() *MockBlobStorage {
 		StaleIndexIDs: make(map[int64]map[int64][]int),
 		Groups:        []domain.Group{},
 		Topics:        make(map[int64][]domain.Topic),
+		NextMessageID: 1000,
 	}
 }
 
@@ -97,6 +102,7 @@ func (m *MockBlobStorage) ListTopics(ctx context.Context, groupID int64) ([]doma
 }
 
 func (m *MockBlobStorage) ListFiles(ctx context.Context, groupID int64, topicID int64) ([]domain.RemoteFile, error) {
+	m.ListFilesCalls++
 	if topics, ok := m.Files[groupID]; ok {
 		if files, ok := topics[topicID]; ok {
 			return files, nil
@@ -120,13 +126,15 @@ func (m *MockBlobStorage) UploadIndex(ctx context.Context, groupID int64, topicI
 		m.Indexes[groupID] = make(map[int64]*domain.FileIndex)
 		m.IndexIDs[groupID] = make(map[int64]int)
 	}
-	messageID := len(m.Indexes[groupID]) + 1
+	m.NextMessageID++
+	messageID := m.NextMessageID
 	m.Indexes[groupID][topicID] = &index
 	m.IndexIDs[groupID][topicID] = messageID
 	return messageID, nil
 }
 
 func (m *MockBlobStorage) ListIndexMessageIDs(ctx context.Context, groupID int64, topicID int64) ([]int, error) {
+	m.ListIndexMessageIDsCalls++
 	if topics, ok := m.StaleIndexIDs[groupID]; ok {
 		if ids, ok := topics[topicID]; ok {
 			return ids, nil
@@ -155,17 +163,21 @@ func (m *MockBlobStorage) GroupTotals(ctx context.Context, groupID int64) (domai
 	return totals, nil
 }
 
-func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+func (m *MockBlobStorage) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) ([]int, error) {
+	m.UploadFileCalls++
 	if m.Files[groupID] == nil {
 		m.Files[groupID] = make(map[int64][]domain.RemoteFile)
 	}
+	m.NextMessageID++
+	messageID := m.NextMessageID
 	m.Files[groupID][topicID] = append(m.Files[groupID][topicID], domain.RemoteFile{
 		Meta: domain.FileMeta{
 			Path: file.Path,
 		},
-		Size: file.Size,
+		Size:      file.Size,
+		MessageID: messageID,
 	})
-	return nil
+	return []int{messageID}, nil
 }
 
 func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID int64, messageID int) error {
@@ -176,7 +188,7 @@ func (m *MockBlobStorage) DeleteFile(ctx context.Context, groupID int64, topicID
 	return nil
 }
 
-func (m *MockBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (m *MockBlobStorage) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("dummy content")), nil
 }
 

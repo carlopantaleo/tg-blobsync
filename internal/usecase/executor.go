@@ -7,6 +7,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"tg-blobsync/internal/domain"
 	"tg-blobsync/internal/pkg/retry"
 	"time"
@@ -15,12 +16,12 @@ import (
 )
 
 type SyncExecutor interface {
-	Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error
+	Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) (domain.SyncResult, error)
 	SetSubDir(subDir string)
 }
 
 type chunkedDownloader interface {
-	DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error)
+	DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error)
 }
 
 type executor struct {
@@ -29,6 +30,8 @@ type executor struct {
 	workers int
 	ui      domain.UserInterface
 	subDir  string
+	mu      sync.Mutex
+	result  domain.SyncResult
 }
 
 func NewExecutor(fs domain.FileSystem, storage domain.BlobStorage, workers int, ui domain.UserInterface) SyncExecutor {
@@ -47,25 +50,25 @@ func (e *executor) SetSubDir(subDir string) {
 	e.subDir = subDir
 }
 
-func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) error {
+func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir string, groupID, topicID int64) (domain.SyncResult, error) {
 	if plan.Summary.Total == 0 {
 		msg := "Everything is up to date."
 		log.Println(msg)
 		if e.ui != nil {
 			_ = e.ui.WaitForInput(msg)
 		}
-		return nil
+		return domain.SyncResult{}, nil
 	}
 
 	// User Confirmation
 	if e.ui != nil {
 		confirmed, err := e.ui.ConfirmSync(plan)
 		if err != nil {
-			return err
+			return domain.SyncResult{}, err
 		}
 		if !confirmed {
 			log.Println("Sync cancelled by user.")
-			return nil
+			return domain.SyncResult{}, nil
 		}
 	}
 
@@ -101,7 +104,7 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 	}
 
 	if err := g.Wait(); err != nil {
-		return err
+		return e.result, err
 	}
 
 	// Execute Deletions
@@ -116,7 +119,7 @@ func (e *executor) Execute(ctx context.Context, plan domain.SyncPlan, rootDir st
 		_ = e.ui.WaitForInput("Sync completed.")
 	}
 
-	return nil
+	return e.result, nil
 }
 
 func (e *executor) processItem(ctx context.Context, item domain.SyncItem, rootDir string, groupID, topicID int64) error {
@@ -146,10 +149,34 @@ func (e *executor) upload(ctx context.Context, item domain.SyncItem, groupID, to
 		uploadFile.Path = item.Path
 	}
 
-	err := e.storage.UploadFile(ctx, groupID, topicID, uploadFile)
+	messageIDs, err := e.storage.UploadFile(ctx, groupID, topicID, uploadFile)
 	if err != nil {
 		return fmt.Errorf("error uploading file %s: %w", item.Path, err)
 	}
+
+	// Record the upload result for delta-based index updates
+	flags := ""
+	if uploadFile.Size == 0 {
+		flags = domain.EmptyFileFlag
+	}
+	if len(messageIDs) > 1 {
+		flags = domain.ChunkFlag
+	}
+	entry := domain.UploadedFile{
+		Path:     uploadFile.Path,
+		Checksum: uploadFile.Checksum,
+		ModTime:  uploadFile.ModTime,
+		Flags:    flags,
+		Size:     uploadFile.Size,
+	}
+	if len(messageIDs) > 1 {
+		entry.ChunkIDs = messageIDs
+	} else if len(messageIDs) == 1 {
+		entry.MessageID = messageIDs[0]
+	}
+	e.mu.Lock()
+	e.result.Uploaded = append(e.result.Uploaded, entry)
+	e.mu.Unlock()
 
 	// If it was an update (RemoteFile exists), delete the old version on Telegram
 	if item.RemoteFile != nil {
@@ -171,6 +198,16 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 	remoteFile := item.RemoteFile
 	fullPath := filepath.Join(rootDir, item.Path)
 
+	var task domain.ProgressTask
+	if e.ui != nil {
+		task = e.ui.Start(item.Path, remoteFile.Size)
+	}
+	defer func() {
+		if task != nil {
+			task.Complete()
+		}
+	}()
+
 	operation := func() error {
 		if remoteFile.Meta.Flags == domain.EmptyFileFlag {
 			log.Printf("[*] Restoring empty file: %s", item.Path)
@@ -187,7 +224,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 		var closers []io.Closer
 		if len(remoteFile.ChunkIDs) > 0 {
 			if chunkedStorage, ok := e.storage.(chunkedDownloader); ok {
-				chunkReader, downloadErr := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, remoteFile.ChunkIDs, remoteFile.Meta.Path, remoteFile.Size)
+				chunkReader, downloadErr := chunkedStorage.DownloadChunkedFile(ctx, groupID, topicID, remoteFile.ChunkIDs, remoteFile.Meta.Path, remoteFile.Size, task)
 				if downloadErr != nil {
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
 				}
@@ -195,7 +232,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 				closers = append(closers, chunkReader)
 			} else {
 				var downloadErr error
-				reader, closers, downloadErr = e.openChunkReaders(ctx, *remoteFile, groupID, topicID)
+				reader, closers, downloadErr = e.openChunkReaders(ctx, *remoteFile, groupID, topicID, task)
 				if downloadErr != nil {
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
 				}
@@ -203,7 +240,7 @@ func (e *executor) download(ctx context.Context, item domain.SyncItem, rootDir s
 		} else {
 			readers := make([]io.Reader, 0, 1)
 			for _, messageID := range remoteMessageIDs(*remoteFile) {
-				rc, downloadErr := e.storage.DownloadFile(ctx, groupID, topicID, messageID, remoteFile.Meta.Path, remoteFile.Size)
+				rc, downloadErr := e.storage.DownloadFile(ctx, groupID, topicID, messageID, remoteFile.Meta.Path, remoteFile.Size, task)
 				if downloadErr != nil {
 					closeReaders(closers)
 					return fmt.Errorf("error downloading file %s: %w", item.Path, downloadErr)
@@ -237,11 +274,14 @@ func closeReaders(readers []io.Closer) {
 	}
 }
 
-func (e *executor) openChunkReaders(ctx context.Context, file domain.RemoteFile, groupID, topicID int64) (io.Reader, []io.Closer, error) {
+func (e *executor) openChunkReaders(ctx context.Context, file domain.RemoteFile, groupID, topicID int64, task domain.ProgressTask) (io.Reader, []io.Closer, error) {
 	readers := make([]io.Reader, 0, len(file.ChunkIDs))
 	closers := make([]io.Closer, 0, len(file.ChunkIDs))
-	for _, messageID := range file.ChunkIDs {
-		reader, err := e.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size)
+	for idx, messageID := range file.ChunkIDs {
+		if task != nil {
+			task.SetChunk(idx+1, len(file.ChunkIDs))
+		}
+		reader, err := e.storage.DownloadFile(ctx, groupID, topicID, messageID, file.Meta.Path, file.Size, task)
 		if err != nil {
 			closeReaders(closers)
 			return nil, nil, err
@@ -269,6 +309,10 @@ func (e *executor) deleteRemote(ctx context.Context, item domain.SyncItem, group
 			return err
 		}
 	}
+	remotePath := item.RemoteFile.Meta.Path
+	e.mu.Lock()
+	e.result.Deleted = append(e.result.Deleted, domain.DeletedFile{Path: remotePath})
+	e.mu.Unlock()
 	return nil
 }
 

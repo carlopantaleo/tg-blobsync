@@ -36,7 +36,7 @@ func (t *TelegramClient) GetIndex(ctx context.Context, groupID int64, topicID in
 		return nil, 0, false, fmt.Errorf("index message %d has an invalid document", message.ID)
 	}
 
-	reader, err := t.DownloadFile(ctx, groupID, topicID, message.ID, "index.json", file.Size)
+	reader, err := t.DownloadFile(ctx, groupID, topicID, message.ID, "index.json", file.Size, nil)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("download topic index: %w", err)
 	}

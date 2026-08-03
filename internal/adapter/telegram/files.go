@@ -219,10 +219,11 @@ func addIndexTotals(totals *domain.GroupTotals, index domain.FileIndex) {
 }
 
 // UploadFile uploads a file to the topic with progress reporting.
-func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+// Returns the Telegram message IDs of the uploaded file (one for a regular
+// file, multiple chunk message IDs for a chunked file).
+func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) ([]int, error) {
 	if t.chunkThreshold > 0 && file.Size > t.chunkThreshold {
-		_, err := t.UploadChunkedFile(ctx, groupID, topicID, file)
-		return err
+		return t.UploadChunkedFile(ctx, groupID, topicID, file)
 	}
 
 	accessHash, _ := t.getAccessHash(groupID)
@@ -234,6 +235,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 	log.Printf("[...] Uploading: %s (%s)", file.Path, formatSize(file.Size))
 
 	var task domain.ProgressTask
+	var messageID int
 
 	err := retry.WithRetry(ctx, "UploadFile: "+file.Path, func() error {
 		// 0. Generate a fresh upload ID for each retry to ensure a clean state
@@ -302,7 +304,7 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		}
 
 		// 4. Send Message with Document
-		_, err = t.sender.To(inputPeer).
+		sent, err := t.sender.To(inputPeer).
 			Reply(int(topicID)).
 			Media(ctx, message.UploadedDocument(u, styling.Plain(caption)).
 				MIME(mimeType).
@@ -312,6 +314,11 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		if err != nil {
 			return fmt.Errorf("failed to send document message: %w", err)
 		}
+		id, ok := messageIDFromUpdates(sent)
+		if !ok {
+			return fmt.Errorf("uploaded message ID not found in updates")
+		}
+		messageID = id
 		return nil
 	}, 5, 1*time.Second)
 
@@ -319,14 +326,14 @@ func (t *TelegramClient) UploadFile(ctx context.Context, groupID int64, topicID 
 		if task != nil {
 			task.Abort()
 		}
-		return err
+		return nil, err
 	}
 
 	if task != nil {
 		task.Complete()
 	}
 	log.Printf("[+] Uploaded: %s", file.Path)
-	return nil
+	return []int{messageID}, nil
 }
 
 // UploadChunkedFile uploads a logical file as ordered Telegram document chunks.
@@ -513,13 +520,19 @@ func (t *TelegramClient) DeleteFile(ctx context.Context, groupID int64, topicID 
 }
 
 // DownloadChunkedFile returns a lazy reader that concatenates chunk messages in order.
-func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64) (io.ReadCloser, error) {
-	return newChunkReader(chunkIDs, func(messageID int) (io.ReadCloser, error) {
-		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size)
-	}), nil
+// If task is non-nil, the storage layer reports per-chunk progress on it instead of
+// creating a new progress task per chunk.
+func (t *TelegramClient) DownloadChunkedFile(ctx context.Context, groupID, topicID int64, chunkIDs []int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
+	open := func(messageID int) (io.ReadCloser, error) {
+		return t.DownloadFile(ctx, groupID, topicID, messageID, fileName, size, task)
+	}
+	if task != nil {
+		return newChunkReaderWithTask(chunkIDs, open, task), nil
+	}
+	return newChunkReader(chunkIDs, open), nil
 }
 
-func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64) (io.ReadCloser, error) {
+func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicID int64, messageID int, fileName string, size int64, task domain.ProgressTask) (io.ReadCloser, error) {
 	accessHash, _ := t.getAccessHash(groupID)
 
 	log.Printf("[...] Downloading: %s (%s)", fileName, formatSize(size))
@@ -584,9 +597,13 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 	// Pipe for streaming
 	pr, pw := io.Pipe()
 
-	var task domain.ProgressTask
-	if t.progressTracker != nil {
-		task = t.progressTracker.Start(fileName, size)
+	var internalTask domain.ProgressTask
+	ownsTask := false
+	if task != nil {
+		internalTask = task
+	} else if t.progressTracker != nil {
+		internalTask = t.progressTracker.Start(fileName, size)
+		ownsTask = true
 	}
 
 	var downloadSuccess bool
@@ -595,11 +612,11 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			t.mu.Lock()
 			delete(t.progressStarts, downloadID)
 			t.mu.Unlock()
-			if task != nil {
+			if internalTask != nil && ownsTask {
 				if downloadSuccess {
-					task.Complete()
+					internalTask.Complete()
 				} else {
-					task.Abort()
+					internalTask.Abort()
 				}
 			}
 		}()
@@ -613,7 +630,7 @@ func (t *TelegramClient) DownloadFile(ctx context.Context, groupID int64, topicI
 			total:     size,
 			lastLog:   0,
 			startTime: time.Now(),
-			task:      task,
+			task:      internalTask,
 		}
 
 		// gotd downloader

@@ -68,8 +68,17 @@ func TestTelegramClient_UploadFile(t *testing.T) {
 			return errors.New("invalid peer")
 		}
 
-		// Response: Updates (usually)
-		resp := &tg.Updates{}
+		// Response: Updates containing the new message ID
+		resp := &tg.Updates{
+			Updates: []tg.UpdateClass{
+				&tg.UpdateNewChannelMessage{
+					Message: &tg.Message{
+						ID:     42,
+						PeerID: &tg.PeerChannel{ChannelID: 100},
+					},
+				},
+			},
+		}
 		buf := new(bin.Buffer)
 		if err := resp.Encode(buf); err != nil {
 			return err
@@ -77,7 +86,7 @@ func TestTelegramClient_UploadFile(t *testing.T) {
 		return output.Decode(buf)
 	})
 
-	err := client.UploadFile(context.Background(), 100, 200, localFile)
+	_, err := client.UploadFile(context.Background(), 100, 200, localFile)
 	if err != nil {
 		t.Fatalf("UploadFile failed: %v", err)
 	}
@@ -114,7 +123,16 @@ func TestTelegramClient_UploadFile_Empty(t *testing.T) {
 
 	// Expect messages.sendMedia
 	mockInvoker.Register(&tg.MessagesSendMediaRequest{}, func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
-		resp := &tg.Updates{}
+		resp := &tg.Updates{
+			Updates: []tg.UpdateClass{
+				&tg.UpdateNewChannelMessage{
+					Message: &tg.Message{
+						ID:     43,
+						PeerID: &tg.PeerChannel{ChannelID: 100},
+					},
+				},
+			},
+		}
 		buf := new(bin.Buffer)
 		if err := resp.Encode(buf); err != nil {
 			return err
@@ -122,7 +140,7 @@ func TestTelegramClient_UploadFile_Empty(t *testing.T) {
 		return output.Decode(buf)
 	})
 
-	err := client.UploadFile(context.Background(), 100, 200, localFile)
+	_, err := client.UploadFile(context.Background(), 100, 200, localFile)
 	if err != nil {
 		t.Fatalf("UploadFile(Empty) failed: %v", err)
 	}
@@ -184,7 +202,7 @@ func TestTelegramClient_DownloadFile(t *testing.T) {
 		return output.Decode(buf)
 	})
 
-	rc, err := client.DownloadFile(context.Background(), 100, 200, 123, "test.txt", 10)
+	rc, err := client.DownloadFile(context.Background(), 100, 200, 123, "test.txt", 10, nil)
 	if err != nil {
 		t.Fatalf("DownloadFile failed: %v", err)
 	}

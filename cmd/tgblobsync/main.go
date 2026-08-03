@@ -301,36 +301,6 @@ func runBrowse(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobSt
 
 func handleSingleDownload(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobStorage, ui domain.UserInterface, req *domain.DownloadRequest, groupID, topicID int64) error {
 	localFS := filesystem.NewLocalFileSystem()
-
-	// Determine local path
-	localPath := filepath.Join(cfg.DirPath, req.File.Meta.Path)
-	localDir := filepath.Dir(localPath)
-
-	if err := localFS.EnsureDir(localDir); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	ui.SetTotalFiles(1)
-	task := ui.Start(req.File.Meta.Path, req.File.Size)
-
-	body, err := storage.DownloadFile(ctx, groupID, topicID, req.File.MessageID, req.File.Meta.Path, req.File.Size)
-	if err != nil {
-		task.Abort()
-		return fmt.Errorf("download failed: %w", err)
-	}
-	defer body.Close()
-
-	if err := localFS.WriteFile(localPath, body); err != nil {
-		task.Abort()
-		return fmt.Errorf("failed to write file: %w", err)
-	}
-
-	if err := localFS.SetModTime(localPath, req.File.Meta.ModTime); err != nil {
-		log.Printf("Warning: failed to set modification time for %s: %v", localPath, err)
-	}
-
-	task.Complete()
-	ui.Wait()
-
-	return nil
+	downloader := usecase.NewSingleDownloader(localFS, storage, ui)
+	return downloader.Download(ctx, req, cfg.DirPath, groupID, topicID)
 }

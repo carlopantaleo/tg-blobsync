@@ -67,11 +67,12 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
 	executor.SetSubDir(s.subDir)
-	if err := executor.Execute(ctx, plan, rootDir, groupID, topicID); err != nil {
+	result, err := executor.Execute(ctx, plan, rootDir, groupID, topicID)
+	if err != nil {
 		return err
 	}
 	if plan.Summary.Total > 0 {
-		return s.rebuildIndex(ctx, groupID, topicID, scanner.RemoteIndexMessageID())
+		return s.updateIndex(ctx, groupID, topicID, scanner, result)
 	}
 	return nil
 }
@@ -109,11 +110,86 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	// 3. Execute
 	executor := NewExecutor(s.fs, s.storage, s.workers, s.ui)
 	executor.SetSubDir(s.subDir)
-	if err := executor.Execute(ctx, plan, rootDir, groupID, topicID); err != nil {
+	result, err := executor.Execute(ctx, plan, rootDir, groupID, topicID)
+	if err != nil {
 		return err
 	}
 	if plan.Summary.Total > 0 {
-		return s.rebuildIndex(ctx, groupID, topicID, scanner.RemoteIndexMessageID())
+		return s.updateIndex(ctx, groupID, topicID, scanner, result)
+	}
+	return nil
+}
+
+// updateIndex updates the topic index after synchronization. For indexed
+// topics, it applies the operation delta to the retained index snapshot and
+// deletes only the known previous index message. For legacy topics, it falls
+// back to a full-topic rebuild.
+func (s *Synchronizer) updateIndex(ctx context.Context, groupID, topicID int64, sc FileScanner, result domain.SyncResult) error {
+	if sc.IsIndexed() && sc.RetainedIndex() != nil {
+		return s.updateIndexByDelta(ctx, groupID, topicID, sc.RemoteIndexMessageID(), sc.RetainedIndex(), result)
+	}
+	return s.rebuildIndex(ctx, groupID, topicID, sc.RemoteIndexMessageID())
+}
+
+// updateIndexByDelta applies the synchronization delta to the retained index
+// snapshot, deletes the previous known index message, and uploads a fresh
+// index. This avoids full-topic reads when the topic was already indexed.
+func (s *Synchronizer) updateIndexByDelta(ctx context.Context, groupID, topicID int64, oldIndexID int, retained *domain.FileIndex, result domain.SyncResult) error {
+	deletedPaths := make(map[string]bool)
+	for _, d := range result.Deleted {
+		deletedPaths[d.Path] = true
+	}
+	uploadedByPath := make(map[string]domain.UploadedFile)
+	for _, u := range result.Uploaded {
+		uploadedByPath[u.Path] = u
+	}
+
+	// Build the new index from the retained snapshot, applying the delta
+	var entries []domain.FileIndexEntry
+	for _, entry := range retained.Entries {
+		if deletedPaths[entry.Path] {
+			continue
+		}
+		if uploaded, ok := uploadedByPath[entry.Path]; ok {
+			// Replace with the uploaded version
+			entries = append(entries, domain.FileIndexEntry{
+				Path:      uploaded.Path,
+				Checksum:  uploaded.Checksum,
+				ModTime:   uploaded.ModTime,
+				Flags:     uploaded.Flags,
+				Size:      uploaded.Size,
+				MessageID: uploaded.MessageID,
+				ChunkIDs:  uploaded.ChunkIDs,
+			})
+			delete(uploadedByPath, entry.Path)
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	// Add newly uploaded files that weren't replacements
+	for _, uploaded := range uploadedByPath {
+		entries = append(entries, domain.FileIndexEntry{
+			Path:      uploaded.Path,
+			Checksum:  uploaded.Checksum,
+			ModTime:   uploaded.ModTime,
+			Flags:     uploaded.Flags,
+			Size:      uploaded.Size,
+			MessageID: uploaded.MessageID,
+			ChunkIDs:  uploaded.ChunkIDs,
+		})
+	}
+
+	newIndex := domain.FileIndex{Entries: entries}
+
+	// Delete the previous known index message
+	if oldIndexID != 0 {
+		if err := s.storage.DeleteFile(ctx, groupID, topicID, oldIndexID); err != nil {
+			return fmt.Errorf("failed to delete old index %d: %w", oldIndexID, err)
+		}
+	}
+
+	if _, err := s.storage.UploadIndex(ctx, groupID, topicID, newIndex); err != nil {
+		return fmt.Errorf("failed to upload updated index: %w", err)
 	}
 	return nil
 }

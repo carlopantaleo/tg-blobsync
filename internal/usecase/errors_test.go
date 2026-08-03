@@ -45,9 +45,9 @@ func (m *MockStorageError) ListFiles(ctx context.Context, groupID int64, topicID
 	return m.MockBlobStorage.ListFiles(ctx, groupID, topicID)
 }
 
-func (m *MockStorageError) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) error {
+func (m *MockStorageError) UploadFile(ctx context.Context, groupID int64, topicID int64, file domain.LocalFile) ([]int, error) {
 	if m.UploadErr != nil {
-		return m.UploadErr
+		return nil, m.UploadErr
 	}
 	return m.MockBlobStorage.UploadFile(ctx, groupID, topicID, file)
 }
@@ -100,7 +100,7 @@ func TestExecutor_UploadError(t *testing.T) {
 		Summary: domain.SyncSummary{Total: 1, ToUpload: 1},
 	}
 
-	err := executor.Execute(context.Background(), plan, "/tmp", 1, 2)
+	_, err := executor.Execute(context.Background(), plan, "/tmp", 1, 2)
 	// Executor currently uses errgroup, so it should return the first error
 	if err == nil {
 		t.Error("Expected error from Execute due to upload failure")
