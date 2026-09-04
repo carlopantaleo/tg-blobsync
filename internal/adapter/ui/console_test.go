@@ -261,12 +261,47 @@ func TestConsoleUI_SelectGroupTopicSubDir_Headless(t *testing.T) {
 	}
 
 	go func() {
-		ui.tuiModel.responseChan <- listItem{value: "custom"}
+		ui.tuiModel.responseChan <- listItem{value: SubDirSelection{Action: SubDirCustom}}
 		ui.tuiModel.responseChan <- "sub/path"
 	}()
-	sub, err := ui.SelectSubDir([]string{"existing"})
-	if err != nil || sub != "sub/path" {
-		t.Fatalf("SelectSubDir got (%s, %v)", sub, err)
+	sel, err := ui.SelectSubDir([]string{"existing"}, "")
+	if err != nil || sel.Action != SubDirCustom || sel.Value != "sub/path" {
+		t.Fatalf("SelectSubDir got (%+v, %v)", sel, err)
+	}
+}
+
+func TestConsoleUI_SelectSubDirDrillDown_Headless(t *testing.T) {
+	ui := NewConsoleUITest()
+
+	// Enter a child directory from inside "a"
+	go func() { ui.tuiModel.responseChan <- listItem{value: SubDirSelection{Action: SubDirEnter, Value: "b"}} }()
+	sel, err := ui.SelectSubDir([]string{"b"}, "a")
+	if err != nil || sel.Action != SubDirEnter || sel.Value != "b" {
+		t.Fatalf("SelectSubDir enter got (%+v, %v)", sel, err)
+	}
+
+	// Confirm the current directory
+	go func() { ui.tuiModel.responseChan <- listItem{value: SubDirSelection{Action: SubDirThis}} }()
+	sel, err = ui.SelectSubDir([]string{"c"}, "a/b")
+	if err != nil || sel.Action != SubDirThis {
+		t.Fatalf("SelectSubDir this got (%+v, %v)", sel, err)
+	}
+
+	// Go up from the root level
+	go func() { ui.tuiModel.responseChan <- listItem{value: SubDirSelection{Action: SubDirUp}} }()
+	sel, err = ui.SelectSubDir([]string{"a"}, "")
+	if err != nil || sel.Action != SubDirUp {
+		t.Fatalf("SelectSubDir up got (%+v, %v)", sel, err)
+	}
+
+	// Enter custom path relative to the current directory
+	go func() {
+		ui.tuiModel.responseChan <- listItem{value: SubDirSelection{Action: SubDirCustom}}
+		ui.tuiModel.responseChan <- "x/y"
+	}()
+	sel, err = ui.SelectSubDir(nil, "a/b")
+	if err != nil || sel.Action != SubDirCustom || sel.Value != "x/y" {
+		t.Fatalf("SelectSubDir custom got (%+v, %v)", sel, err)
 	}
 }
 

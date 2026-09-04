@@ -649,15 +649,40 @@ func (u *ConsoleUI) SelectTopic(topics []domain.Topic) (domain.Topic, error) {
 	return domain.Topic{}, errors.New("selection cancelled")
 }
 
-// SelectSubDir prompts the user for a subdirectory path.
-func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
+// SubDirSelection is the outcome of one step of the drill-down subdirectory
+// selection menu.
+type SubDirSelection struct {
+	Action string
+	Value  string
+}
+
+// Subdirectory selection actions returned by SelectSubDir.
+const (
+	SubDirEnter  = "enter"  // enter the child directory named in Value
+	SubDirThis   = "this"   // confirm the current directory
+	SubDirCustom = "custom" // user typed a custom path (in Value), relative to the current directory
+	SubDirUp     = "up"     // go back up one level (or to topic selection at the root)
+)
+
+// SelectSubDir shows one level of the drill-down subdirectory menu: the
+// immediate children of currentPath plus the standard entries.
+func (u *ConsoleUI) SelectSubDir(existingSubDirs []string, currentPath string) (SubDirSelection, error) {
+	displayPath := currentPath
+	if displayPath == "" {
+		displayPath = "/"
+	}
+	upLabel := ".. [Up]"
+	if currentPath == "" {
+		upLabel = ".. [Back to Topics]"
+	}
+
 	items := []list.Item{
-		listItem{title: ".. [Back to Groups]", value: "back"},
-		listItem{title: "[ Root / No subdirectory ]", value: ""},
-		listItem{title: "[ Enter custom path ]", value: "custom"},
+		listItem{title: upLabel, value: SubDirSelection{Action: SubDirUp}},
+		listItem{title: "[ This directory ]", value: SubDirSelection{Action: SubDirThis}},
+		listItem{title: "[ Enter custom path ]", value: SubDirSelection{Action: SubDirCustom}},
 	}
 	for _, s := range existingSubDirs {
-		items = append(items, listItem{title: "\U0001F4C1 " + s, value: s})
+		items = append(items, listItem{title: "\U0001F4C1 " + s, value: SubDirSelection{Action: SubDirEnter, Value: s}})
 	}
 
 	d := list.NewDefaultDelegate()
@@ -665,26 +690,30 @@ func (u *ConsoleUI) SelectSubDir(existingSubDirs []string) (string, error) {
 	d.SetHeight(1)
 	d.SetSpacing(0)
 	l := list.New(items, d, 0, 0)
-	l.Title = "Select or enter subdirectory"
+	l.Title = "Select subdirectory - " + displayPath
 
 	u.send(showListMsg{list: l})
 
 	res, ok := <-u.tuiModel.responseChan
 	if !ok {
-		return "", errors.New("quitting")
+		return SubDirSelection{}, errors.New("quitting")
 	}
 	if item, ok := res.(listItem); ok {
-		val, isStr := item.value.(string)
-		if isStr && val == "back" {
-			return "", errors.New("back")
+		sel, isSel := item.value.(SubDirSelection)
+		if !isSel {
+			return SubDirSelection{}, errors.New("selection cancelled")
 		}
-		if isStr && val == "custom" {
-			return u.Prompt("Enter custom subdirectory path")
+		if sel.Action == SubDirCustom {
+			input, err := u.Prompt("Enter subdirectory path relative to " + displayPath)
+			if err != nil {
+				return SubDirSelection{}, err
+			}
+			return SubDirSelection{Action: SubDirCustom, Value: input}, nil
 		}
-		return val, nil
+		return sel, nil
 	}
 
-	return "", errors.New("selection cancelled")
+	return SubDirSelection{}, errors.New("selection cancelled")
 }
 
 // AskToCreateTopic prompts to create a new topic if needed (Not in requirements but useful)

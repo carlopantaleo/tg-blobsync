@@ -38,7 +38,7 @@ type identifierResolver interface {
 type selectionUI interface {
 	SelectGroup(groups []domain.Group) (domain.Group, error)
 	SelectTopic(topics []domain.Topic) (domain.Topic, error)
-	SelectSubDir(existingSubDirs []string) (string, error)
+	SelectSubDir(existingSubDirs []string, currentPath string) (ui.SubDirSelection, error)
 	ShowGroupTotals(totals domain.GroupTotals) error
 	ConfirmCreateIndex(message string) (bool, error)
 }
@@ -138,6 +138,42 @@ restart_identifiers:
 		}
 	}
 	return err
+}
+
+// immediateSubDirs returns the sorted, deduplicated names of the directories
+// directly contained in the given prefix, derived from remote file paths.
+// Paths use forward slashes; prefix may be empty (topic root).
+func immediateSubDirs(files []domain.RemoteFile, prefix string) []string {
+	searchPrefix := ""
+	if prefix != "" {
+		searchPrefix = prefix + "/"
+	}
+	seen := make(map[string]bool)
+	for _, f := range files {
+		path := filepath.ToSlash(f.Meta.Path)
+		if !strings.HasPrefix(path, searchPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(path, searchPrefix)
+		if idx := strings.Index(rest, "/"); idx > 0 {
+			seen[rest[:idx]] = true
+		}
+	}
+	var result []string
+	for s := range seen {
+		result = append(result, s)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// joinSubDir combines a current navigation prefix with a relative child or
+// custom path, producing a normalized forward-slash path.
+func joinSubDir(prefix, child string) string {
+	if prefix == "" {
+		return strings.Trim(filepath.ToSlash(child), "/")
+	}
+	return strings.Trim(prefix+"/"+strings.Trim(filepath.ToSlash(child), "/"), "/")
 }
 
 func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, blobStorage domain.BlobStorage, console selectionUI) (int64, int64, error) {
@@ -251,29 +287,38 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 			}
 
 			if err == nil && len(files) > 0 {
-				subdirsMap := make(map[string]bool)
-				for _, f := range files {
-					path := filepath.ToSlash(f.Meta.Path)
-					parts := strings.Split(path, "/")
-					if len(parts) > 1 {
-						subdirsMap[parts[0]] = true
+				current := ""
+				for {
+					sel, err := console.SelectSubDir(immediateSubDirs(files, current), current)
+					if err != nil {
+						if err.Error() == "back" {
+							cfg.TopicName = "" // Reset topic to force re-selection
+							return 0, 0, err   // Propagate back to caller to avoid tight loop
+						}
+						return 0, 0, err
+					}
+					switch sel.Action {
+					case ui.SubDirUp:
+						if current == "" {
+							// At root, going up returns to topic selection
+							cfg.TopicName = ""
+							return 0, 0, fmt.Errorf("back")
+						}
+						current = filepath.ToSlash(filepath.Dir(current))
+						if current == "." {
+							current = ""
+						}
+					case ui.SubDirEnter:
+						current = joinSubDir(current, sel.Value)
+					case ui.SubDirCustom:
+						cfg.SubDir = joinSubDir(current, sel.Value)
+					case ui.SubDirThis:
+						cfg.SubDir = current
+					}
+					if sel.Action == ui.SubDirCustom || sel.Action == ui.SubDirThis {
+						break
 					}
 				}
-				var existing []string
-				for s := range subdirsMap {
-					existing = append(existing, s)
-				}
-				sort.Strings(existing)
-
-				selectedSubDir, err := console.SelectSubDir(existing)
-				if err != nil {
-					if err.Error() == "back" {
-						cfg.TopicName = "" // Reset topic to force re-selection
-						return 0, 0, err   // Propagate back to caller to avoid tight loop
-					}
-					return 0, 0, err
-				}
-				cfg.SubDir = selectedSubDir
 			}
 		}
 		break
