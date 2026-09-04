@@ -156,3 +156,55 @@ func TestDiffer_DiffPull(t *testing.T) {
 		t.Errorf("deleted.txt action mismatch: %v", actions["deleted.txt"])
 	}
 }
+
+func TestDiffer_DiffPushNoDelete(t *testing.T) {
+	differ := NewDiffer(false, true)
+
+	local := map[string]domain.LocalFile{
+		"new.txt": {Path: "new.txt", Checksum: "abc", ModTime: 100, Size: 10},
+	}
+
+	remote := map[string]domain.RemoteFile{
+		"deleted.txt": {Meta: domain.FileMeta{Path: "deleted.txt", Checksum: "jkl", ModTime: 400}, Size: 40},
+	}
+
+	plan := differ.DiffPush(local, remote)
+
+	if plan.Summary.ToDelete != 0 {
+		t.Errorf("Expected 0 deletes with noDelete, got %d", plan.Summary.ToDelete)
+	}
+	if plan.Summary.ToUpload != 1 {
+		t.Errorf("Expected 1 upload (new), got %d", plan.Summary.ToUpload)
+	}
+	for _, item := range plan.Items {
+		if item.Action == domain.ActionDeleteRemote {
+			t.Errorf("Expected no ActionDeleteRemote items, got one for %s", item.Path)
+		}
+	}
+}
+
+func TestDiffer_DiffPullNoDelete(t *testing.T) {
+	differ := NewDiffer(true, true)
+
+	local := map[string]domain.LocalFile{
+		"deleted.txt": {Path: "deleted.txt", ModTime: 400, Size: 40},
+	}
+
+	remote := map[string]domain.RemoteFile{
+		"new.txt": {Meta: domain.FileMeta{Path: "new.txt", ModTime: 100}, Size: 10},
+	}
+
+	plan := differ.DiffPull(local, remote)
+
+	if plan.Summary.ToDelete != 0 {
+		t.Errorf("Expected 0 deletes with noDelete, got %d", plan.Summary.ToDelete)
+	}
+	if plan.Summary.ToDownload != 1 {
+		t.Errorf("Expected 1 download (new), got %d", plan.Summary.ToDownload)
+	}
+	for _, item := range plan.Items {
+		if item.Action == domain.ActionDeleteLocal {
+			t.Errorf("Expected no ActionDeleteLocal items, got one for %s", item.Path)
+		}
+	}
+}

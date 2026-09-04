@@ -21,6 +21,7 @@ type CLIConfig struct {
 	Workers        int
 	UploadThreads  int
 	SkipMD5        bool
+	NoDelete       bool
 	ChunkThreshold int64 `json:"chunkThreshold" yaml:"chunkThreshold"`
 	ChunkSize      int64 `json:"chunkSize" yaml:"chunkSize"`
 }
@@ -43,6 +44,7 @@ func ParseCLI(appIDDef string, appHashDef string) (*CLIConfig, error) {
 	fs.IntVar(&cfg.Workers, "workers", 1, "Number of concurrent files")
 	fs.IntVar(&cfg.UploadThreads, "upload-threads", 8, "Number of parallel threads for a single file upload")
 	fs.BoolVar(&cfg.SkipMD5, "skip-md5", false, "Skip MD5 calculation and use modification time instead")
+	fs.BoolVar(&cfg.NoDelete, "no-delete", false, "Do not delete files that exist only on the target side (push/pull)")
 	fs.Int64Var(&cfg.ChunkThreshold, "chunk-threshold", DefaultChunkThreshold, "Chunk files larger than this many bytes")
 	fs.Int64Var(&cfg.ChunkSize, "chunk-size", DefaultChunkSize, "Size of each uploaded chunk in bytes")
 

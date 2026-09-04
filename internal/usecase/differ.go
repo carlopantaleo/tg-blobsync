@@ -11,13 +11,18 @@ type SyncDiffer interface {
 }
 
 type differ struct {
-	skipMD5 bool
+	skipMD5  bool
+	noDelete bool
 }
 
-func NewDiffer(skipMD5 bool) SyncDiffer {
-	return &differ{
+func NewDiffer(skipMD5 bool, noDelete ...bool) SyncDiffer {
+	d := &differ{
 		skipMD5: skipMD5,
 	}
+	if len(noDelete) > 0 {
+		d.noDelete = noDelete[0]
+	}
+	return d
 }
 
 func (d *differ) DiffPush(local map[string]domain.LocalFile, remote map[string]domain.RemoteFile) domain.SyncPlan {
@@ -53,7 +58,7 @@ func (d *differ) DiffPush(local map[string]domain.LocalFile, remote map[string]d
 
 	// Check remote files (Delete)
 	for path, remoteFile := range remote {
-		if _, exists := local[path]; !exists {
+		if _, exists := local[path]; !exists && !d.noDelete {
 			items = append(items, domain.SyncItem{
 				Path:       path,
 				Action:     domain.ActionDeleteRemote,
@@ -107,7 +112,7 @@ func (d *differ) DiffPull(local map[string]domain.LocalFile, remote map[string]d
 
 	// Check local files (Delete)
 	for path, localFile := range local {
-		if _, exists := remote[path]; !exists {
+		if _, exists := remote[path]; !exists && !d.noDelete {
 			items = append(items, domain.SyncItem{
 				Path:      path,
 				Action:    domain.ActionDeleteLocal,

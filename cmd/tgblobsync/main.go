@@ -331,6 +331,7 @@ func runSync(ctx context.Context, cfg *config.CLIConfig, storage domain.BlobStor
 	localFS := filesystem.NewLocalFileSystem()
 	syncer := usecase.NewSynchronizer(localFS, storage, cfg.Workers, ui, cfg.SkipMD5)
 	syncer.SetSubDir(cfg.SubDir)
+	syncer.SetNoDelete(cfg.NoDelete)
 
 	if push {
 		return syncer.Push(ctx, cfg.DirPath, groupID, topicID)

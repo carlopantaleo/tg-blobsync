@@ -55,6 +55,45 @@ func TestParseCLI(t *testing.T) {
 			},
 		},
 		{
+			name:        "Push with no-delete",
+			args:        []string{"tgblobsync", "push", "--no-delete", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "push",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if !cfg.NoDelete {
+					t.Error("expected NoDelete true")
+				}
+			},
+		},
+		{
+			name:        "Push without no-delete defaults to false",
+			args:        []string{"tgblobsync", "push", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "push",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if cfg.NoDelete {
+					t.Error("expected NoDelete false by default")
+				}
+			},
+		},
+		{
+			name:        "Pull with no-delete",
+			args:        []string{"tgblobsync", "pull", "--no-delete", "/tmp/data"},
+			envAppID:    "12345",
+			envAppHash:  "abcdef",
+			expectedCmd: "pull",
+			wantErr:     false,
+			validate: func(t *testing.T, cfg *CLIConfig) {
+				if !cfg.NoDelete {
+					t.Error("expected NoDelete true")
+				}
+			},
+		},
+		{
 			name:        "Pull with only local path",
 			args:        []string{"tgblobsync", "pull", "/tmp/data"},
 			envAppID:    "12345",
