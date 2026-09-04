@@ -17,4 +17,4 @@
 - [x] 3.2 Implement: add `SetNoDelete(bool)` (or equivalent) on `Synchronizer` in `internal/usecase/sync.go`, pass it to `NewDiffer` in both `Push` and `Pull`; wire `cfg.NoDelete` in `cmd/tgblobsync/main.go` `runSync` for both commands
 - [x] 3.3 Verify full test suite (`go test ./...`) and `go build ./...` pass
 - [x] 3.4 Update user documentation in `doc/` if a CLI/command reference doc exists (mention `--no-delete` on push and pull)
-- [ ] 3.5 Commit: `feat(sync): wire --no-delete from CLI to synchronizer`
+- [x] 3.5 Commit: `feat(sync): wire --no-delete from CLI to synchronizer`
