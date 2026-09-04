@@ -12,12 +12,12 @@
 
 ## 3. Navigation loop wiring
 
-- [ ] 3.1 Add failing tests around `resolveIdentifiersInternal` (or an extracted navigation function) in `cmd/tgblobsync/main_test.go` using fake resolver/UI: entering `a` then `b` then "This directory" sets `cfg.SubDir` to `a/b`; "custom" input `x/y` inside `a` sets `cfg.SubDir` to `a/x/y`; up/back at root preserves the existing "back to topics" error flow
-- [ ] 3.2 Implement the navigation loop in the SubDir selection block of `resolveIdentifiersInternal` in `cmd/tgblobsync/main.go`: compute children per level via `immediateSubDirs`, handle enter/up/this/custom results, combine custom paths with the current prefix
-- [ ] 3.3 Run tests until green; commit: `feat(cli): navigate subdirectories at any depth when selecting push/pull scope`
+- [x] 3.1 Add failing tests around `resolveIdentifiersInternal` (or an extracted navigation function) in `cmd/tgblobsync/main_test.go` using fake resolver/UI: entering `a` then `b` then "This directory" sets `cfg.SubDir` to `a/b`; "custom" input `x/y` inside `a` sets `cfg.SubDir` to `a/x/y`; up/back at root preserves the existing "back to topics" error flow
+- [x] 3.2 Implement the navigation loop in the SubDir selection block of `resolveIdentifiersInternal` in `cmd/tgblobsync/main.go`: compute children per level via `immediateSubDirs`, handle enter/up/this/custom results, combine custom paths with the current prefix
+- [x] 3.3 Run tests until green; commit: `feat(cli): navigate subdirectories at any depth when selecting push/pull scope`
 
 ## 4. Verification
 
-- [ ] 4.1 Run full test suite (`go test ./...`) and `go build ./...`
+- [x] 4.1 Run full test suite (`go test ./...`) and `go build ./...`
 - [ ] 4.2 Update user documentation in `doc/` if a CLI/command reference doc exists (describe drill-down subdirectory selection)
-- [ ] 4.3 Commit: `docs: document drill-down subdirectory selection`
+- [x] 4.3 Commit: `docs: document drill-down subdirectory selection`
