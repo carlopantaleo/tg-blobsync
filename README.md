@@ -97,6 +97,7 @@ tgblobsync browse [flags] [<group>:<topic>]
 | `--workers` | Number of concurrent files to process | 1 |
 | `--upload-threads` | Number of parallel threads for a single file upload | 8 |
 | `--skip-md5` | Use modification time and size instead of MD5 checksums | false |
+| `--no-delete` | Do not delete files that exist only on the target side (`push`/`pull`) | false |
 | `--chunk-threshold` | Chunk files larger than this many bytes | 2147483648 |
 | `--chunk-size` | Size of each uploaded chunk in bytes | 1073741824 |
 

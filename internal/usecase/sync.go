@@ -8,12 +8,13 @@ import (
 )
 
 type Synchronizer struct {
-	fs      domain.FileSystem
-	storage domain.BlobStorage
-	workers int
-	ui      domain.UserInterface
-	skipMD5 bool
-	subDir  string
+	fs       domain.FileSystem
+	storage  domain.BlobStorage
+	workers  int
+	ui       domain.UserInterface
+	skipMD5  bool
+	noDelete bool
+	subDir   string
 }
 
 func NewSynchronizer(
@@ -36,6 +37,10 @@ func (s *Synchronizer) SetSubDir(subDir string) {
 	s.subDir = subDir
 }
 
+func (s *Synchronizer) SetNoDelete(noDelete bool) {
+	s.noDelete = noDelete
+}
+
 func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicID int64) error {
 	log.Println("Starting Push synchronization...")
 
@@ -53,7 +58,7 @@ func (s *Synchronizer) Push(ctx context.Context, rootDir string, groupID, topicI
 	}
 
 	// 2. Diff
-	differ := NewDiffer(s.skipMD5)
+	differ := NewDiffer(s.skipMD5, s.noDelete)
 	plan := differ.DiffPush(localFiles, remoteFiles)
 
 	log.Printf("Sync Summary (Push):")
@@ -96,7 +101,7 @@ func (s *Synchronizer) Pull(ctx context.Context, rootDir string, groupID, topicI
 	}
 
 	// 2. Diff
-	differ := NewDiffer(s.skipMD5)
+	differ := NewDiffer(s.skipMD5, s.noDelete)
 	plan := differ.DiffPull(localFiles, remoteFiles)
 
 	log.Printf("Sync Summary (Pull):")
