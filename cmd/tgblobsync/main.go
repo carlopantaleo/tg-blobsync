@@ -140,6 +140,33 @@ restart_identifiers:
 	return err
 }
 
+// immediateSubDirs returns the sorted, deduplicated names of the directories
+// directly contained in the given prefix, derived from remote file paths.
+// Paths use forward slashes; prefix may be empty (topic root).
+func immediateSubDirs(files []domain.RemoteFile, prefix string) []string {
+	searchPrefix := ""
+	if prefix != "" {
+		searchPrefix = prefix + "/"
+	}
+	seen := make(map[string]bool)
+	for _, f := range files {
+		path := filepath.ToSlash(f.Meta.Path)
+		if !strings.HasPrefix(path, searchPrefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(path, searchPrefix)
+		if idx := strings.Index(rest, "/"); idx > 0 {
+			seen[rest[:idx]] = true
+		}
+	}
+	var result []string
+	for s := range seen {
+		result = append(result, s)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, blobStorage domain.BlobStorage, console selectionUI) (int64, int64, error) {
 	for {
 		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)

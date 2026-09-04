@@ -5,11 +5,46 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"testing"
 
 	"tg-blobsync/internal/config"
 	"tg-blobsync/internal/domain"
 )
+
+func TestImmediateSubDirs(t *testing.T) {
+	files := []domain.RemoteFile{
+		{Meta: domain.FileMeta{Path: "a/b/c/file1.txt"}},
+		{Meta: domain.FileMeta{Path: "a/file2.txt"}},
+		{Meta: domain.FileMeta{Path: "other/f.txt"}},
+		{Meta: domain.FileMeta{Path: "root.txt"}},
+		{Meta: domain.FileMeta{Path: "a/b/file3.txt"}},
+	}
+
+	tests := []struct {
+		name     string
+		prefix   string
+		expected []string
+	}{
+		{"root lists first-level dirs only", "", []string{"a", "other"}},
+		{"a lists its immediate children", "a", []string{"b"}},
+		{"a/b lists its immediate children", "a/b", []string{"c"}},
+		{"leaf dir yields empty list", "a/b/c", nil},
+		{"non-matching prefix yields empty list", "zzz", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := immediateSubDirs(files, tt.prefix)
+			if len(got) == 0 && len(tt.expected) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("immediateSubDirs(%q) = %v, want %v", tt.prefix, got, tt.expected)
+			}
+		})
+	}
+}
 
 // TestRun_NoArgs verifies run returns an error when CLI args are missing.
 func TestRun_NoArgs(t *testing.T) {
