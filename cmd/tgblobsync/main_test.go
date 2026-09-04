@@ -68,7 +68,7 @@ func TestResolveIdentifiersWithNames(t *testing.T) {
 		files:       []domain.RemoteFile{{Meta: domain.FileMeta{Path: "subdir/file.txt"}, Size: 10}},
 	}
 	blobStorage := &stubBlobStorage{}
-	console := &stubConsole{subdirSelections: []ui.SubDirSelection{{Action: ui.SubDirEnter, Value: "chosen"}}}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{{Action: ui.SubDirEnter, Value: "chosen"}, {Action: ui.SubDirThis}}}
 
 	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err != nil {
@@ -273,7 +273,7 @@ func TestResolveIdentifiers_SubDirUsesIndex(t *testing.T) {
 			},
 		},
 	}
-	console := &stubConsole{subdirSelections: []ui.SubDirSelection{{Action: ui.SubDirEnter, Value: "indexed_dir"}}}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{{Action: ui.SubDirEnter, Value: "indexed_dir"}, {Action: ui.SubDirThis}}}
 
 	groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err != nil {
@@ -316,6 +316,91 @@ func TestResolveIdentifiers_TopicNotFound(t *testing.T) {
 	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
 	if err == nil {
 		t.Fatalf("expected error when topic not found")
+	}
+}
+
+func subdirDrillDownStorage() *stubTelegram {
+	return &stubTelegram{
+		files: []domain.RemoteFile{
+			{Meta: domain.FileMeta{Path: "a/b/c/file1.txt"}},
+			{Meta: domain.FileMeta{Path: "a/file2.txt"}},
+			{Meta: domain.FileMeta{Path: "other/f.txt"}},
+		},
+	}
+}
+
+func TestResolveIdentifiers_DrillDownIntoNestedSubdir(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.CLIConfig{Command: "push", GroupName: "1", TopicName: "2"}
+	storage := subdirDrillDownStorage()
+	blobStorage := &stubBlobStorage{}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{
+		{Action: ui.SubDirEnter, Value: "a"},
+		{Action: ui.SubDirEnter, Value: "b"},
+		{Action: ui.SubDirThis},
+	}}
+
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SubDir != "a/b" {
+		t.Fatalf("expected subdir 'a/b', got %q", cfg.SubDir)
+	}
+}
+
+func TestResolveIdentifiers_CustomPathRelativeToCurrentDir(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.CLIConfig{Command: "push", GroupName: "1", TopicName: "2"}
+	storage := subdirDrillDownStorage()
+	blobStorage := &stubBlobStorage{}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{
+		{Action: ui.SubDirEnter, Value: "a"},
+		{Action: ui.SubDirCustom, Value: "x/y"},
+	}}
+
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SubDir != "a/x/y" {
+		t.Fatalf("expected subdir 'a/x/y', got %q", cfg.SubDir)
+	}
+}
+
+func TestResolveIdentifiers_UpActionAtRootGoesBack(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.CLIConfig{Command: "push", GroupName: "1", TopicName: "2"}
+	storage := subdirDrillDownStorage()
+	blobStorage := &stubBlobStorage{}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{
+		{Action: ui.SubDirUp},
+	}}
+
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
+	if err == nil || err.Error() != "back" {
+		t.Fatalf("expected back error, got %v", err)
+	}
+}
+
+func TestResolveIdentifiers_UpActionInsideDirGoesUpOneLevel(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.CLIConfig{Command: "push", GroupName: "1", TopicName: "2"}
+	storage := subdirDrillDownStorage()
+	blobStorage := &stubBlobStorage{}
+	console := &stubConsole{subdirSelections: []ui.SubDirSelection{
+		{Action: ui.SubDirEnter, Value: "a"},
+		{Action: ui.SubDirEnter, Value: "b"},
+		{Action: ui.SubDirUp},
+		{Action: ui.SubDirThis},
+	}}
+
+	_, _, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SubDir != "a" {
+		t.Fatalf("expected subdir 'a', got %q", cfg.SubDir)
 	}
 }
 

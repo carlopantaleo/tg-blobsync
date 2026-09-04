@@ -167,6 +167,15 @@ func immediateSubDirs(files []domain.RemoteFile, prefix string) []string {
 	return result
 }
 
+// joinSubDir combines a current navigation prefix with a relative child or
+// custom path, producing a normalized forward-slash path.
+func joinSubDir(prefix, child string) string {
+	if prefix == "" {
+		return strings.Trim(filepath.ToSlash(child), "/")
+	}
+	return strings.Trim(prefix+"/"+strings.Trim(filepath.ToSlash(child), "/"), "/")
+}
+
 func resolveIdentifiers(ctx context.Context, cfg *config.CLIConfig, storage identifierResolver, blobStorage domain.BlobStorage, console selectionUI) (int64, int64, error) {
 	for {
 		groupID, topicID, err := resolveIdentifiersInternal(ctx, cfg, storage, blobStorage, console)
@@ -278,23 +287,37 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 			}
 
 			if err == nil && len(files) > 0 {
-				sel, err := console.SelectSubDir(immediateSubDirs(files, ""), "")
-				if err != nil {
-					if err.Error() == "back" {
-						cfg.TopicName = "" // Reset topic to force re-selection
-						return 0, 0, err   // Propagate back to caller to avoid tight loop
+				current := ""
+				for {
+					sel, err := console.SelectSubDir(immediateSubDirs(files, current), current)
+					if err != nil {
+						if err.Error() == "back" {
+							cfg.TopicName = "" // Reset topic to force re-selection
+							return 0, 0, err   // Propagate back to caller to avoid tight loop
+						}
+						return 0, 0, err
 					}
-					return 0, 0, err
-				}
-				switch sel.Action {
-				case ui.SubDirUp:
-					// At root, going up returns to topic selection
-					cfg.TopicName = ""
-					return 0, 0, fmt.Errorf("back")
-				case ui.SubDirEnter, ui.SubDirCustom:
-					cfg.SubDir = sel.Value
-				case ui.SubDirThis:
-					cfg.SubDir = ""
+					switch sel.Action {
+					case ui.SubDirUp:
+						if current == "" {
+							// At root, going up returns to topic selection
+							cfg.TopicName = ""
+							return 0, 0, fmt.Errorf("back")
+						}
+						current = filepath.ToSlash(filepath.Dir(current))
+						if current == "." {
+							current = ""
+						}
+					case ui.SubDirEnter:
+						current = joinSubDir(current, sel.Value)
+					case ui.SubDirCustom:
+						cfg.SubDir = joinSubDir(current, sel.Value)
+					case ui.SubDirThis:
+						cfg.SubDir = current
+					}
+					if sel.Action == ui.SubDirCustom || sel.Action == ui.SubDirThis {
+						break
+					}
 				}
 			}
 		}
