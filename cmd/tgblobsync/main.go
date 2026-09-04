@@ -38,7 +38,7 @@ type identifierResolver interface {
 type selectionUI interface {
 	SelectGroup(groups []domain.Group) (domain.Group, error)
 	SelectTopic(topics []domain.Topic) (domain.Topic, error)
-	SelectSubDir(existingSubDirs []string) (string, error)
+	SelectSubDir(existingSubDirs []string, currentPath string) (ui.SubDirSelection, error)
 	ShowGroupTotals(totals domain.GroupTotals) error
 	ConfirmCreateIndex(message string) (bool, error)
 }
@@ -278,21 +278,7 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 			}
 
 			if err == nil && len(files) > 0 {
-				subdirsMap := make(map[string]bool)
-				for _, f := range files {
-					path := filepath.ToSlash(f.Meta.Path)
-					parts := strings.Split(path, "/")
-					if len(parts) > 1 {
-						subdirsMap[parts[0]] = true
-					}
-				}
-				var existing []string
-				for s := range subdirsMap {
-					existing = append(existing, s)
-				}
-				sort.Strings(existing)
-
-				selectedSubDir, err := console.SelectSubDir(existing)
+				sel, err := console.SelectSubDir(immediateSubDirs(files, ""), "")
 				if err != nil {
 					if err.Error() == "back" {
 						cfg.TopicName = "" // Reset topic to force re-selection
@@ -300,7 +286,16 @@ func resolveIdentifiersInternal(ctx context.Context, cfg *config.CLIConfig, stor
 					}
 					return 0, 0, err
 				}
-				cfg.SubDir = selectedSubDir
+				switch sel.Action {
+				case ui.SubDirUp:
+					// At root, going up returns to topic selection
+					cfg.TopicName = ""
+					return 0, 0, fmt.Errorf("back")
+				case ui.SubDirEnter, ui.SubDirCustom:
+					cfg.SubDir = sel.Value
+				case ui.SubDirThis:
+					cfg.SubDir = ""
+				}
 			}
 		}
 		break
