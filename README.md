@@ -86,7 +86,7 @@ tgblobsync browse [flags] [<group>:<topic>]
 ### Interactive Features
 
 - **Change Confirmation**: Detailed view of planned changes (Upload/Download/Delete) before execution, with a compact single-line layout for easy review.
-- **Subdirectory Selection**: Visual selection of existing remote subdirectories with folder icons.
+- **Subdirectory Selection**: Drill-down navigation of existing remote subdirectories at any depth — enter folders, confirm the current directory, or type a custom path relative to it.
 - **Input Waiting**: The tool clearly indicates when an operation is completed or when everything is up to date, waiting for user confirmation before exiting.
 
 
