@@ -19,5 +19,5 @@
 ## 4. Verification
 
 - [x] 4.1 Run full test suite (`go test ./...`) and `go build ./...`
-- [ ] 4.2 Update user documentation in `doc/` if a CLI/command reference doc exists (describe drill-down subdirectory selection)
+- [x] 4.2 Update user documentation in `doc/` if a CLI/command reference doc exists (describe drill-down subdirectory selection)
 - [x] 4.3 Commit: `docs: document drill-down subdirectory selection`
