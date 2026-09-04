@@ -1,9 +1,9 @@
 ## 1. CLI flag parsing
 
 - [x] 1.1 Create and checkout branch `feature/add-push-no-delete-option`
-- [ ] 1.2 Add failing tests in `internal/config/cli.go`'s test file (e.g. `internal/config/config_test.go`) asserting `--no-delete` sets `CLIConfig.NoDelete=true` for both `push` and `pull`, and defaults to `false`
-- [ ] 1.3 Implement: add `NoDelete bool` field to `CLIConfig` and register `fs.BoolVar(&cfg.NoDelete, "no-delete", false, ...)` in `internal/config/cli.go`, and document it in the `push` and `pull` usage help
-- [ ] 1.4 Run the new config tests until green; commit: `feat(cli): add --no-delete flag for push and pull`
+- [x] 1.2 Add failing tests in `internal/config/cli.go`'s test file (e.g. `internal/config/config_test.go`) asserting `--no-delete` sets `CLIConfig.NoDelete=true` for both `push` and `pull`, and defaults to `false`
+- [x] 1.3 Implement: add `NoDelete bool` field to `CLIConfig` and register `fs.BoolVar(&cfg.NoDelete, "no-delete", false, ...)` in `internal/config/cli.go`, and document it in the `push` and `pull` usage help
+- [x] 1.4 Run the new config tests until green; commit: `feat(cli): add --no-delete flag for push and pull`
 
 ## 2. Differ skips deletions in both directions
 
