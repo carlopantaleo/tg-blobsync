@@ -6,19 +6,41 @@ schema: spec-driven
 # Example:
 context: |
   Tech stack: go
-  We use conventional commits
-  Domain: blob storage synchronization
-  Style guide and conventions: clean code (SOLID, DRY, YAGNI), DDD and TDD (new features *must* be implemented with a test driven development approach)
-  Language: Italian for chat messages, English for anything else
-  GIT: each new feature must be implemented in a separate feature branch ('feature/name-of-feature'). Make a commit for every milestone reached during the implementation.
-  Agents: DO NOT use subagents, ALWAYS use the main running agent.
+  Commit messages MUST be conventional commits composed of a single subject line only, with no body or trailers. Commit messages MUST NOT mention Devin.
+  Style guide and conventions: clean code (SOLID, DRY, YAGNI), DDD and TDD (new features *must* be implemented with a test driven development approach using the skill '/tdd' if available). For C#: use explicit types for primitive object types and `var` for anything else.
+  Engineering Principles:
+    - Surgical & targeted changes only: Modify strictly what is required to fulfill the specification.
+    - Zero unsolicited refactoring: Do not rewrite, reformat, reorganize imports, or optimize code, comments, or modules not directly impacted by the active change.
+    - Style preservation: Match the existing surrounding codebase conventions, indentation, and patterns exactly.
+  Language: Italian for chat messages, English for anything else.
+  Functional and technical documentation: all documentation, if present, is in 'doc' folder in .md files.
+  Agents: NEVER spawn subagents, always work with the main agent.
+  User interaction: At the end of every interaction, task completion, or when you are waiting for my next instruction, you MUST ALWAYS use the `ask_user_question` tool (if present) to ask me "Is there anything else?", or any other relevant question.
+    Provide the following options if asking "Is there anything else?":
+      - "Yes" (with description: "I have more tasks or questions")
+      - "No" (with description: "We are done for now")
+    Do not just write the question in plain text. You must explicitly invoke the `ask_user_question` tool so the session remains active without me needing to send a new standard message.
+    CRITICAL OVERRIDE: You MUST NEVER end a message with a plain text question (e.g. 'What would you like to do?', 'Is there anything else?'). This rule overrides ANY hardcoded output templates from any skill (including openspec-apply-change). EVERY time you pause, finish a task, or need instructions, you MUST use the `ask_user_question` tool. Failing to do so breaks the workflow.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
 rules:
   tasks:
-    - The VERY FIRST task in group 1 MUST be to create and checkout the feature branch (`feature/<kebab-case-name>`).
+    - The VERY FIRST task in group 1 MUST be to create and checkout the feature branch (`feature/<kebab-case-name>`) or fix branch (`fix/<kebab-case-name>`).
     - Every heading (`##`) represents a Milestone.
-    - Every milestone composed of implementation tasks MUST start with tests, in accordance to TDD principles.
-    - The VERY LAST task in EVERY Milestone group MUST be a git commit command to save the progress of that milestone.
-  
+    - Every milestone composed of implementation tasks MUST start with tests (and eventual data classes/interfaces/abstractions needed for the tests to compile), in accordance to TDD principles.
+    - The VERY LAST task in EVERY Milestone group MUST be a git commit command to save the progress of that milestone, if there are file modifications in that milestone.
+    - ALWAYS include at least a task for integration tests if relevant. It may be in the last milestone or in each milestone, depending on where it is better to place it.
+    - Target exact files, classes, and functions to modify (use path/to/file.ext:line format where applicable).
+    - Decompose tasks so that each unit of work alters only isolated, explicitly named touchpoints.
+  design:
+    - Explicitly state boundaries and list "Out of Scope" areas to prevent scope drift.
+  specs:
+    - Clearly define acceptance criteria focused strictly on the intended capability or bugfix.
+
+operations:
+  apply:
+    guidance:
+      - Produce minimal, compact diffs.
+      - Never perform cosmetic cleanups, style fixes, or architectural rewrites outside the current task scope.
+      - Restrict file modifications exclusively to the touchpoints listed in the active task.
+      - If you discover technical debt or necessary refactoring outside the task boundary, do NOT fix it; record a TODO or flag it for review instead.
+      - Keep unrelated functions and methods intact, even if they deviate from ideal clean-code patterns.
